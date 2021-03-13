@@ -23,6 +23,8 @@ class GlobalContainer(object):
     debug_mode = "True"
     
     influx_url = "http://localhost:8086"
+    influx_host = "localhost"
+    influx_port = "8086"
     influx_db = "stock"
     
     logger = None
@@ -81,7 +83,8 @@ class GlobalContainer(object):
                                'LogNumber': self.log_number,
                                'Debug': self.debug_mode,}
             
-            config['InfluxDB'] = {'URL': self.influx_url,
+            config['InfluxDB'] = {'Host': self.influx_host,
+                                  'Port': self.influx_port,
                                   'Database': self.influx_db}
         
             with open(configPath, 'w') as configfile:
@@ -103,7 +106,8 @@ class GlobalContainer(object):
             self.log_number = int(configParser.get('Basic', 'LogNumber', fallback = self.log_number))
             self.debug_mode = configParser.get('Basic', 'Debug', fallback = self.debug_mode).lower() in ['true', '1', 't', 'y', 'yes']
             
-            self.influx_url = configParser.get('InfluxDB', 'URL', fallback = self.influx_url)
+            self.influx_host = configParser.get('InfluxDB', 'Host', fallback = self.influx_host)
+            self.influx_port = int(configParser.get('InfluxDB', 'Port', fallback = self.influx_port))
             self.influx_db = configParser.get('InfluxDB', 'Database', fallback = self.influx_db)
             
         except Exception as e:

@@ -13,6 +13,8 @@ import logging
 import os
 import datetime
 
+import engines.grabstocks
+
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-c", "--config", required=False, help="path to config file")
@@ -37,6 +39,8 @@ try:
     logger.info("Last modified on:  %s", datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S'))
     logger.info("Logfile:           %s", gc.log_path)
     
+    
+    engines.grabstocks.urlTest(gc)
     
 except Exception as e:
     logger.exception('Crash!', exc_info=e)
