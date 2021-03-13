@@ -6,4 +6,11 @@ Created on Sat Mar 13 20:48:22 2021
 """
 
 
+import sys
+
 print("Hello World!")
+print("Python version")
+print (sys.version)
+print("Version info.")
+print (sys.version_info)
+
