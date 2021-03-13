@@ -7,10 +7,18 @@ Created on Sat Mar 13 20:48:22 2021
 
 
 import sys
+import argparse
+import common.globalcontainer as glob
 
-print("Hello World!")
-print("Python version")
-print (sys.version)
-print("Version info.")
-print (sys.version_info)
+
+ap = argparse.ArgumentParser()
+ap.add_argument("-c", "--config", required=True, help="path to config file")
+
+args = vars(ap.parse_args())
+
+configFile = args["config"]
+
+gc = glob.GlobalContainer(configFile)
+
+print (gc.influx_url)
 
