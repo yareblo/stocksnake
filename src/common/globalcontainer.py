@@ -10,6 +10,15 @@ import configparser as cfp
 import os
 import logging
 import logging.handlers
+import sys
+import common.loghandler as lh
+
+import common.base
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 
 
@@ -26,6 +35,11 @@ class GlobalContainer(object):
     influx_host = "localhost"
     influx_port = "8086"
     influx_db = "stock"
+    
+    mysql_host = "localhost"
+    mysql_user = "stocksnake_usr"
+    mysql_password = "*secret*"
+    mysql_db = "stocksnake"
     
     logger = None
     
@@ -67,6 +81,14 @@ class GlobalContainer(object):
                 
             self.logger = logging.getLogger(__name__)
             
+            self.prepareMySQLDatabase()
+            
+            # Add Database Handler
+            logdb = lh.LogDBHandler(self.ses)
+            
+            logger.addHandler(logdb)
+            
+            
         except Exception as e:
             self.logger.exception('Crash! - STOPPING -', exc_info=e)
             sys.exit(99)
@@ -86,6 +108,11 @@ class GlobalContainer(object):
             config['InfluxDB'] = {'Host': self.influx_host,
                                   'Port': self.influx_port,
                                   'Database': self.influx_db}
+            
+            config['MySQL'] = {'Host': self.mysql_host,
+                               'User': self.mysql_user,
+                               'Password': self.mysql_password,
+                               'Database': self.mysql_db}
         
             with open(configPath, 'w') as configfile:
                 config.write(configfile)
@@ -110,7 +137,35 @@ class GlobalContainer(object):
             self.influx_port = int(configParser.get('InfluxDB', 'Port', fallback = self.influx_port))
             self.influx_db = configParser.get('InfluxDB', 'Database', fallback = self.influx_db)
             
+            self.mysql_host = configParser.get('MySQL', 'Host', fallback = self.mysql_host)
+            self.mysql_user = configParser.get('MySQL', 'User', fallback = self.mysql_user)
+            self.mysql_password = configParser.get('MySQL', 'Password', fallback = self.mysql_password)
+            self.mysql_db = configParser.get('MySQL', 'Database', fallback = self.mysql_db)
+            
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
+    
+    
+    def prepareMySQLDatabase(self):
+        
+        try:
+            # prepare database
+#            self.eng = create_engine(f'mysql+mysqlconnector://pybackup:47!!TorfBat7en@localhost/{db_schema}')
+            cmd = (f'mysql+mysqlconnector://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}/{self.mysql_db}')
+            self.logger.debug(cmd)
+            self.eng = create_engine(cmd)
+            Base = declarative_base()
+           
+            #base.Base.metadata.bind = eng        
+            #base.Base.metadata.create_all()  
+            common.base.Base.metadata.create_all(self.eng, checkfirst=True)
+        
+            Session = sessionmaker(bind=self.eng)
+            self.ses = Session()    
+        except Exception as e:
+            self.logger.exception('Crash!', exc_info=e)
+            sys.exit(99)
+    
+
     
     

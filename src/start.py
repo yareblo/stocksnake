@@ -31,16 +31,25 @@ logger = logging.getLogger(__name__)
 
 try:
 
-    logger.info('-----------------------------------------------------------')
-    logger.info("Started")
-    logger.info("Running script:    %s", os.path.abspath(__file__))
-    logger.info("Debug-Mode:        %s", gc.debug_mode)
+    l = logging.root.level
+    logger.setLevel(logging.DEBUG)
+    logger.info('------------------------------ START ------------------------------')
+    logger.info(f'Running script:    {os.path.abspath(__file__)}')
+    logger.info(f'Debug-Mode:        {gc.debug_mode}')
     ts = os.path.getmtime(__file__)
-    logger.info("Last modified on:  %s", datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S'))
-    logger.info("Logfile:           %s", gc.log_path)
+    logger.info(f"Last modified on:  {datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f'Logfile:           {gc.log_path}')
+    logger.info(f"Loglevel:          {l}")
+    logger.setLevel(l)
+    
+    # engines.grabstocks.urlTest(gc)
     
     
-    engines.grabstocks.urlTest(gc)
+    
+    l = logging.root.level
+    logger.setLevel(logging.DEBUG)
+    logger.info('------------------------------ END ------------------------------')
+    logger.setLevel(l)
     
 except Exception as e:
     logger.exception('Crash!', exc_info=e)
