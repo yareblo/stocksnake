@@ -42,7 +42,7 @@ try:
     logger.info(f"Loglevel:          {l}")
     logger.setLevel(l)
     
-    # engines.grabstocks.urlTest(gc)
+    engines.grabstocks.urlTest(gc)
     
     
     

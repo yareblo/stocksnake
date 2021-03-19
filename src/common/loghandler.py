@@ -26,7 +26,7 @@ class LogDBHandler(logging.Handler):
             self.ses.add(log)
             self.ses.commit()
         
-            print(record)        
+            #print(record)        
 
         
         except Exception as e:
