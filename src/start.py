@@ -14,6 +14,7 @@ import os
 import datetime
 
 import engines.grabstocks
+import dataobjects.stock
 
 
 ap = argparse.ArgumentParser()
@@ -42,9 +43,24 @@ try:
     logger.info(f"Loglevel:          {l}")
     logger.setLevel(l)
     
-    engines.grabstocks.urlTest(gc)
+    #gc.resetDatabases()
+    
+    vw = dataobjects.stock.Stock("Volkswagen VZ", "DE0007664039")
+    vw.ComdirectId = "176173"
+    
+    acn = dataobjects.stock.Stock("Accenture", "IE00B4BNMY34")
+    acn.ComdirectId = "55081566"
+    
+    hd = dataobjects.stock.Stock("Heidelberger Druck", "DE0007314007")
+    hd.ComdirectId = "164941"
+    
+    engines.grabstocks.urlTest(gc, acn) # Accenture
+    engines.grabstocks.urlTest(gc, vw)  # VW VZ-Aktie
+    engines.grabstocks.urlTest(gc, hd)  # Heidelberg Druck
     
     
+    
+        
     
     l = logging.root.level
     logger.setLevel(logging.DEBUG)

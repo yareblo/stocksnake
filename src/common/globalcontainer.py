@@ -20,6 +20,7 @@ from sqlalchemy import Column, Integer, String, DateTime
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
+from influxdb import DataFrameClient
 
 
 class GlobalContainer(object):
@@ -34,12 +35,16 @@ class GlobalContainer(object):
     influx_url = "http://localhost:8086"
     influx_host = "localhost"
     influx_port = "8086"
+    influx_user = ""
+    influx_pwd = ""
     influx_db = "stock"
+    influxClient = None
     
     mysql_host = "localhost"
     mysql_user = "stocksnake_usr"
     mysql_password = "*secret*"
     mysql_db = "stocksnake"
+    ses = None
     
     logger = None
     
@@ -81,13 +86,16 @@ class GlobalContainer(object):
                 
             self.logger = logging.getLogger(__name__)
             
-            self.prepareMySQLDatabase()
+            # Connect to MySQL
+            self.connectMySQLDatabase()
             
             # Add Database Handler
             logdb = lh.LogDBHandler(self.ses)
             
             logger.addHandler(logdb)
             
+            # Connect to Influx
+            self.connectInfluxDatabase()
             
         except Exception as e:
             self.logger.exception('Crash! - STOPPING -', exc_info=e)
@@ -146,7 +154,7 @@ class GlobalContainer(object):
             self.logger.exception('Crash!', exc_info=e)
     
     
-    def prepareMySQLDatabase(self):
+    def connectMySQLDatabase(self):
         
         try:
             # prepare database
@@ -154,7 +162,7 @@ class GlobalContainer(object):
             cmd = (f'mysql+mysqlconnector://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}/{self.mysql_db}')
             self.logger.debug(cmd)
             self.eng = create_engine(cmd)
-            Base = declarative_base()
+            #Base = declarative_base()
            
             #base.Base.metadata.bind = eng        
             #base.Base.metadata.create_all()  
@@ -165,7 +173,50 @@ class GlobalContainer(object):
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
             sys.exit(99)
+        
+        
+    def connectInfluxDatabase(self):
+        
+        try:
+            # prepare database
+            self.logger.debug(f'Connecting to Influx with: Host:{self.influx_host}, Port: {self.influx_port}, User: {self.influx_user}, DB: {self.influx_db}')
+            self.influxClient = DataFrameClient(self.influx_host, self.influx_port, self.influx_user, self.influx_pwd, self.influx_db)
+            
+        except Exception as e:
+            self.logger.exception('Crash!', exc_info=e)
+            sys.exit(99)
     
 
+    def resetDatabases(self):
+        try:
+            self.logger.warning("Resetting Databases")
+            
+            self.resetMySQLDatabases()
+            self.resetInfluxDatabases()
+            
+        except Exception as e:
+            self.logger.exception('Crash!', exc_info=e)
     
     
+    def resetMySQLDatabases(self):
+        try:
+            self.logger.warning("Resetting MySQL-Database")
+            
+            #Base = declarative_base()
+            common.base.Base.metadata.drop_all(self.eng, checkfirst=True)
+            common.base.Base.metadata.create_all(self.eng, checkfirst=True)
+            
+        except Exception as e:
+            self.logger.exception('Crash!', exc_info=e)
+
+            
+    def resetInfluxDatabases(self):
+        try:
+            self.logger.warning("Resetting Influx-Database")
+            
+            self.influxClient.drop_database(self.influx_db)
+            self.influxClient.create_database(self.influx_db)
+            
+            
+        except Exception as e:
+            self.logger.exception('Crash!', exc_info=e)
