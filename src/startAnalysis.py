@@ -5,7 +5,6 @@ Created on Sat Mar 13 20:48:22 2021
 @author: Sebastian
 """
 
-
 import sys
 import argparse
 import common.globalcontainer as glob
@@ -14,7 +13,8 @@ import os
 import datetime
 
 import engines.grabstocks
-import dataobjects.stock
+import engines.scaffold
+from dataobjects.stock import Stock
 
 
 ap = argparse.ArgumentParser()
@@ -26,12 +26,11 @@ configFile = args["config"]
 if (configFile == None):
     configFile = "config.cfg"
 
-gc = glob.GlobalContainer(configFile)
-
+gc = glob.GlobalContainer(configFile, "LoadStocks")
 logger = logging.getLogger(__name__)
 
 try:
-
+    gc.writeJobStatus("Running", StartDate=datetime.datetime.now(), statusMessage="Started")
     l = logging.root.level
     logger.setLevel(logging.DEBUG)
     logger.info('------------------------------ START ------------------------------')
@@ -43,29 +42,28 @@ try:
     logger.info(f"Loglevel:          {l}")
     logger.setLevel(l)
     
-    #gc.resetDatabases()
+    #gc.resetMySQLDatabases()
+    #gc.resetInfluxDatabases()
     
-    vw = dataobjects.stock.Stock("Volkswagen VZ", "DE0007664039")
-    vw.ComdirectId = "176173"
+    engines.scaffold.loadStocks(gc, "../data/ISINS.csv")
     
-    acn = dataobjects.stock.Stock("Accenture", "IE00B4BNMY34")
-    acn.ComdirectId = "55081566"
+    for s in gc.ses.query(Stock).all():
+        gc.writeJobStatus("Running", statusMessage=f'Enriching Stock {s.Name}')
+        cId = engines.scaffold.enrichStock(gc, s)
     
-    hd = dataobjects.stock.Stock("Heidelberger Druck", "DE0007314007")
-    hd.ComdirectId = "164941"
-    
-    engines.grabstocks.urlTest(gc, acn) # Accenture
-    engines.grabstocks.urlTest(gc, vw)  # VW VZ-Aktie
-    engines.grabstocks.urlTest(gc, hd)  # Heidelberg Druck
-    
-    
-    
-        
+    for s in gc.ses.query(Stock).all():
+        gc.writeJobStatus("Running", statusMessage=f'Grabbing Stock {s.Name}')
+        engines.grabstocks.grabStock(gc, s)
     
     l = logging.root.level
     logger.setLevel(logging.DEBUG)
     logger.info('------------------------------ END ------------------------------')
     logger.setLevel(l)
+    
+    if (gc.numErrors == 0):
+        gc.writeJobStatus("Completed", EndDate=datetime.datetime.now(), statusMessage="Completed OK")
+    else:
+        gc.writeJobStatus("ERROR", EndDate=datetime.datetime.now(), statusMessage=gc.errMsg)
     
 except Exception as e:
     logger.exception('Crash!', exc_info=e)

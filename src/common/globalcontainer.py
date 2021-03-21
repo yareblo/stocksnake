@@ -12,6 +12,7 @@ import logging
 import logging.handlers
 import sys
 import common.loghandler as lh
+import datetime
 
 import common.base
 from sqlalchemy import create_engine
@@ -21,6 +22,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 from influxdb import DataFrameClient
+
+from dataobjects.scriptStatus import ScriptStatus
 
 
 class GlobalContainer(object):
@@ -47,13 +50,18 @@ class GlobalContainer(object):
     ses = None
     
     logger = None
-    
     log_path = None
     
-    def __init__(self, configPath):
+    jobName = "unknown"
+    
+    numErrors = 0
+    errMsg = ""
+    
+    def __init__(self, configPath, job):
         
         try:
             log_screen = True
+            self.jobName = job
             
             self.readConfig(configPath)
             self.writeConfig(configPath)
@@ -100,7 +108,6 @@ class GlobalContainer(object):
         except Exception as e:
             self.logger.exception('Crash! - STOPPING -', exc_info=e)
             sys.exit(99)
-    
     
     def writeConfig(self, configPath):
         
@@ -185,7 +192,6 @@ class GlobalContainer(object):
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
             sys.exit(99)
-    
 
     def resetDatabases(self):
         try:
@@ -196,7 +202,6 @@ class GlobalContainer(object):
             
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
-    
     
     def resetMySQLDatabases(self):
         try:
@@ -220,3 +225,42 @@ class GlobalContainer(object):
             
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
+            
+            
+    def writeJobStatus(self, Status, StartDate=None, EndDate=None, statusMessage=None):
+        try:
+            jobStatus = None
+            res = self.ses.query(ScriptStatus).filter(ScriptStatus.Name == self.jobName)
+                
+            if (res.count() == 0):
+                self.logger.debug(f'ScriptStatus {self.jobName} not found, creating...')
+                jobStatus = ScriptStatus(self.jobName)
+
+                self.ses.add(jobStatus)
+                self.ses.commit()
+            else:
+                jobStatus = res.first()
+            
+            jobStatus.StatusDateTime = datetime.datetime.now()
+            jobStatus.Status = Status
+            
+            if StartDate is not None:
+                jobStatus.StartDateTime = StartDate 
+                
+            if EndDate is not None:
+                jobStatus.EndDateTime = EndDate
+                
+            if statusMessage is not None:
+                jobStatus.StatusMessage = statusMessage
+                
+            jobStatus.ErrorNumbers = self.numErrors
+            jobStatus.errMessage = self.errMsg
+            
+            self.ses.add(jobStatus)
+            self.ses.commit()
+            
+        except Exception as e:
+            self.logger.exception('Crash!', exc_info=e)
+            
+            
+            

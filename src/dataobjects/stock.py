@@ -18,14 +18,23 @@ class Stock(Base):
     Name = Column(String(256))
     NameShort = Column(String(256))
     WKN = Column(String(256))
-    ISIN = Column(String(256))
+    ISIN = Column(String(256), index=True)
+    
+    StockType = Column(String(256))
+    StockSubType = Column(String(256))
+    Currency = Column(String(256))
+    
+    Industry = Column(String(256))
+    
+    PreferredMarketplace = Column(String(256))
+    Marketplace = Column(String(256))
     
     ComdirectId = Column(String(256))
     
-
-
-
-    def __init__(self, Name, ISIN):
-        self.Name = Name
+    def __init__(self, ISIN):
         self.ISIN = ISIN
+
+    # def __init__(self, Name, ISIN):
+    #     self.Name = Name
+    #     self.ISIN = ISIN
         

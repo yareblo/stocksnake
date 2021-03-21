@@ -15,12 +15,12 @@ import dataobjects.stock
 
 
 
-def urlTest(gc, stock):
+def grabStock(gc, stock):
 
     logger = logging.getLogger(__name__)
     
     try:
-        logger.debug(f'Loading Stock {stock.Name}, ISIN: {stock.ISIN}')
+        logger.info(f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
         # get timestamp of latest point
         qry = f'select time, close from StockValues where ISIN = \'{stock.ISIN}\' order by time desc limit 1'
         res = gc.influxClient.query(qry)
@@ -31,7 +31,6 @@ def urlTest(gc, stock):
         endDate = datetime.datetime.now().strftime("%d.%m.%Y")
         
         if len(res) > 0:
-        
             ts = res['StockValues'].index[0]
             ts = ts - datetime.timedelta(days=2)
             startDate = ts.strftime("%d.%m.%Y")
@@ -51,7 +50,7 @@ def urlTest(gc, stock):
                 
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                logger.debug("Reached end")
+                logger.debug(f"Reached end for stock {stock.NameShort}")
             else:
                 logger.exception('Crash!', exc_info=e)
 
@@ -75,9 +74,11 @@ def urlTest(gc, stock):
         timeValues  = df[ ['high','low', 'open', 'close', 'volume'] ]
         timeValues.index = df.index
 
-        logger.debug(f'Writing {len(df.index)} rows to InfluxDB')
-        gc.influxClient.write_points(df, "StockValues", {'ISIN': stock.ISIN, 'Name': stock.Name}, protocol='line')
+        logger.debug(f'Writing {len(df.index)} rows to InfluxDB for stock {stock.Name}')
+        gc.influxClient.write_points(df, "StockValues", {'ISIN': stock.ISIN, 'Name': stock.NameShort}, protocol='line')
         
     
     except Exception as e:
         logger.exception('Crash!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += f'Crash grabbing stock {stock.ISIN}; '
