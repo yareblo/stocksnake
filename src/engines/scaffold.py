@@ -33,12 +33,13 @@ def loadStocks(gc, path):
             csv_reader = reader(read_obj)
             # Iterate over each row in the csv using reader object
             for row in csv_reader:
+                isin = row[0].strip()
                 # row variable is a list that represents a row in csv
-                res = gc.ses.query(Stock).filter(Stock.ISIN == row[0])
+                res = gc.ses.query(Stock).filter(Stock.ISIN == isin)
                 
                 if (res.count() == 0):
-                    logger.debug(f'ISIN {row[0]} not found, creating...')
-                    s = Stock(row[0])
+                    logger.debug(f'ISIN {isin} not found, creating...')
+                    s = Stock(isin)
                     gc.ses.add(s)
                     gc.ses.commit()
     
@@ -96,7 +97,7 @@ def enrichStock(gc, stock):
         
         sn = os.linesep.join([s for s in head.text.splitlines() if s]).splitlines()[0]
         
-        stock.NameShort = sn
+        stock.NameShort = sn.strip()
 
         # Scrape Stammdaten
         #
@@ -124,34 +125,34 @@ def enrichStock(gc, stock):
             #
             dfw = (df.loc[df[0] == "Währung"])
             if (len(dfw.index) >0):
-                stock.Currency = dfw.iloc[0][1]
+                stock.Currency = dfw.iloc[0][1].strip()
 
             # Extract WKN
             #
             dfw = (df.loc[df[0] == "WKN"])
             if (len(dfw.index) >0):
-                stock.WKN = dfw.iloc[0][1]
+                stock.WKN = dfw.iloc[0][1].strip()
                 
             # Extract Type
             #
             dfw = (df.loc[df[0] == "Wertpapiertyp"])
             if (len(dfw.index) >0):
                 stock.StockType = "Aktie"
-                stock.StockSubType = dfw.iloc[0][1]
+                stock.StockSubType = dfw.iloc[0][1].strip()
             dfw = (df.loc[df[0] == "Fondskategorie"])
             if (len(dfw.index) >0):
                 stock.StockType = "Fonds"
-                stock.StockSubType = dfw.iloc[0][1]
+                stock.StockSubType = dfw.iloc[0][1].strip()
             dfw = (df.loc[df[0] == "Anlagekategorie"])
             if (len(dfw.index) >0):
                 stock.StockType = "ETF"
-                stock.StockSubType = dfw.iloc[0][1]
+                stock.StockSubType = dfw.iloc[0][1].strip()
       
             # Extract Branche
             #
             dfw = (df.loc[df[0] == "Branche"])
             if (len(dfw.index) >0):
-                stock.Industry = dfw.iloc[0][1]
+                stock.Industry = dfw.iloc[0][1].strip()
         
         gc.ses.add(stock)
         gc.ses.commit()
