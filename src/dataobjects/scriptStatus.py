@@ -22,12 +22,16 @@ class ScriptStatus(Base):
     
     ProjectedEndofStepDateTime = Column(DateTime)  
     ProjectedEndDateTime = Column(DateTime)  
+    LastSuccessDateTime = Column(DateTime)  
 
     Status = Column(String(256))            # Running, Completed, Error
     StatusMessage = Column(String(2048))  
     
     ErrorNumbers = Column(Integer)
-    ErrorMessage = Column(String(2048))  
+    ErrorMessage = Column(String(4096))  
+    
+    WarningNumbers = Column(Integer)
+    WarningMessage = Column(String(4096))  
 
 
     def __init__(self, name):

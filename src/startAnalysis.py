@@ -77,6 +77,8 @@ def buildDepotStock(df_trans, df_distri, myDepot, myISIN):
         logger.debug(f'Building value list for depot {myDepot} and stock {myISIN}')
         gc.writeJobStatus("Running", statusMessage=f'Building value list for depot {myDepot} and stock {myISIN}')
 
+        engines.scaffold.addStock(gc, myISIN)
+
         # convert date to timestamp
         df_trans['TimeStamp'] = pd.to_datetime(df_trans['Datum'], format='%d.%m.%Y')
         df_trans = df_trans.set_index('TimeStamp')
@@ -187,13 +189,18 @@ try:
         pass
         #print(df)
     
-
-    
     
     #sys.exit()
+    
+    
+    # Process Notes
+    #
+    engines.scaffold.loadNotes(gc, "../data/Notizen.ods")
+
+    
     # Correlation Matrix
-    
-    
+    #
+    #
     dfs = []
     
     for s in gc.ses.query(Stock).all():
@@ -223,7 +230,7 @@ try:
     
     
     if (gc.numErrors == 0):
-        gc.writeJobStatus("Completed", EndDate=datetime.datetime.now(), statusMessage="Completed OK")
+        gc.writeJobStatus("Completed", EndDate=datetime.datetime.now(), SuccessDate=datetime.datetime.now(), statusMessage="Completed OK")
     else:
         gc.writeJobStatus("ERROR", EndDate=datetime.datetime.now(), statusMessage=gc.errMsg)
         logger.error("")

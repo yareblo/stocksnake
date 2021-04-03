@@ -9,18 +9,23 @@ import urllib
 import logging
 import csv
 import pandas as pd
+import numpy as np
 import sys
 import datetime
-import dataobjects.stock
+from dataobjects.stock import Stock
 
 
 
 def grabStock(gc, stock):
-
+    """This loads the prices of the stock and stores it in influxdb. It queries 
+    the latest available price and loads the data between the available price
+    and now."""
     logger = logging.getLogger(__name__)
     
     try:
+       
         logger.info(f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
+        gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
         # get timestamp of latest point
         qry = f'select time, close from StockValues where ISIN = \'{stock.ISIN}\' order by time desc limit 1'
         res = gc.influxClient.query(qry)
@@ -40,6 +45,7 @@ def grabStock(gc, stock):
         # url = "https://www.comdirect.de/inf/kursdaten/historic.csv?DATETIME_TZ_END_RANGE_FORMATED=13.03.2021&DATETIME_TZ_START_RANGE_FORMATED=23.11.2011&ID_NOTATION=55081566&INTERVALL=16&WITH_EARNINGS=true"
         df = pd.DataFrame()
         
+        
         try:
             for offset in range(0, 999):
                 logger.debug(f'Offset: {offset}')
@@ -53,6 +59,13 @@ def grabStock(gc, stock):
                 logger.debug(f"Reached end for stock {stock.NameShort}")
             else:
                 logger.exception('Crash!', exc_info=e)
+
+        if (len(df.index) == 0):
+            msg = f"No Prices found for Stock {stock.NameShort}, ISIN: {stock.ISIN}"
+            logger.error(msg)
+            gc.errMsg += (msg + "; ")
+            gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN} - ERROR')
+            return
 
         df['TimeStamp'] = pd.to_datetime(df['Datum'], format='%d.%m.%Y')
         df['Eröffnung'] = (df['Eröffnung'].replace('\.','', regex=True).replace(',','.', regex=True).astype(float))
@@ -75,10 +88,65 @@ def grabStock(gc, stock):
         timeValues.index = df.index
 
         logger.debug(f'Writing {len(df.index)} rows to InfluxDB for stock {stock.Name}')
-        gc.influxClient.write_points(df, "StockValues", {'ISIN': stock.ISIN, 'Name': stock.NameShort}, protocol='line')
+        gc.influxClient.write_points(df, "StockValues", {'ISIN': stock.ISIN, 'Name': stock.NameShort}, protocol='line', batch_size=500)
         
+        gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN} - DONE')
     
+    except Exception as e:
+        logger.exception(f'Crash grabbing stock {stock.ISIN}', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += f'Crash grabbing stock {stock.ISIN}; '
+        
+        
+def createTestStocks(gc):
+    """This will create the following test stocks:
+        ISIN: TEST0001: All values are 100
+        ISIN: TEST0002: All values are 200
+        
+        ISIN: TEST0003: linear increase from 100 to 200
+        """
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = "Starting createTestStocks"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+        N = 20
+        start = '2021-03-01'
+        
+        s = Stock('TEST0001')
+        s.NameShort = "TestStock 100"
+        s.ComdirectId = -1
+        gc.ses.add(s)
+        gc.ses.commit()
+        rng = pd.date_range(start, periods = N, freq='D')
+        df = pd.DataFrame({'open': 100.0, 'high': 100.0, 'low': 100.0, 'close': 100.0, 'volume': 100.0 }, index = rng) 
+        gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+
+        s = Stock('TEST0002')
+        s.NameShort = "TestStock 200"
+        s.ComdirectId = -1
+        gc.ses.add(s)
+        gc.ses.commit()
+        df = pd.DataFrame({'open': 200.0, 'high': 200.0, 'low': 200.0, 'close': 200.0, 'volume': 200.0 }, index = rng) 
+        gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+
+        s = Stock('TEST0003')
+        s.NameShort = "TestStock Ascending"
+        s.ComdirectId = -1
+        gc.ses.add(s)
+        gc.ses.commit()
+        val = np.arange(100.0, 100.0 + N, 1.0)
+        df = pd.DataFrame({'open': val, 'high': val, 'low': val, 'close': val, 'volume': val }, index = rng) 
+        gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+    
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+        
+        #sys.exit()
+        
     except Exception as e:
         logger.exception('Crash!', exc_info=e)
         gc.numErrors += 1
-        gc.errMsg += f'Crash grabbing stock {stock.ISIN}; '
+        gc.errMsg += "Crash createTestStocks; "

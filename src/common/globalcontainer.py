@@ -24,6 +24,7 @@ from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 from influxdb import DataFrameClient
 
 from dataobjects.scriptStatus import ScriptStatus
+from engines.resolver import Resolver
 
 
 class GlobalContainer(object):
@@ -57,11 +58,19 @@ class GlobalContainer(object):
     numErrors = 0
     errMsg = ""
     
+    numWarnings = 0
+    warnMsg = ""
+    
+    resolver = None
+    
+    data_root = "../data/"
+    
     def __init__(self, configPath, job):
         
         try:
             log_screen = True
             self.jobName = job
+            self.resolver = Resolver(self)
             
             self.readConfig(configPath)
             self.writeConfig(configPath)
@@ -128,6 +137,9 @@ class GlobalContainer(object):
                                'User': self.mysql_user,
                                'Password': self.mysql_password,
                                'Database': self.mysql_db}
+            
+            config['Data'] = {'DataRoot': self.data_root,
+                               }
         
             with open(configPath, 'w') as configfile:
                 config.write(configfile)
@@ -156,6 +168,8 @@ class GlobalContainer(object):
             self.mysql_user = configParser.get('MySQL', 'User', fallback = self.mysql_user)
             self.mysql_password = configParser.get('MySQL', 'Password', fallback = self.mysql_password)
             self.mysql_db = configParser.get('MySQL', 'Database', fallback = self.mysql_db)
+            
+            self.data_root = configParser.get('Data', 'DataRoot', fallback = self.data_root)
             
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
@@ -227,7 +241,7 @@ class GlobalContainer(object):
             self.logger.exception('Crash!', exc_info=e)
             
             
-    def writeJobStatus(self, Status, StartDate=None, EndDate=None, statusMessage=None):
+    def writeJobStatus(self, Status, StartDate=None, EndDate=None, statusMessage=None, SuccessDate=None):
         try:
             jobStatus = None
             res = self.ses.query(ScriptStatus).filter(ScriptStatus.Name == self.jobName)
@@ -244,6 +258,9 @@ class GlobalContainer(object):
             jobStatus.StatusDateTime = datetime.datetime.now()
             jobStatus.Status = Status
             
+            if SuccessDate is not None:
+                jobStatus.LastSuccessDateTime = SuccessDate 
+            
             if StartDate is not None:
                 jobStatus.StartDateTime = StartDate 
                 
@@ -254,7 +271,10 @@ class GlobalContainer(object):
                 jobStatus.StatusMessage = statusMessage
                 
             jobStatus.ErrorNumbers = self.numErrors
-            jobStatus.errMessage = self.errMsg
+            jobStatus.ErrorMessage = self.errMsg
+            
+            jobStatus.WarningNumbers = self.numWarnings
+            jobStatus.WarningMessage = self.warnMsg
             
             self.ses.add(jobStatus)
             self.ses.commit()

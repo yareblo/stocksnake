@@ -44,19 +44,32 @@ try:
     
     #gc.resetMySQLDatabases()
     #gc.resetInfluxDatabases()
+
+    # s = Stock("IE00B6897102")
+    # engines.scaffold.enrichStock(gc, s)
+    # sys.exit()
     
+    
+    # Fill base-Table with ISINS
     engines.scaffold.loadStocks(gc, "../data/ISINS.csv")
     
+    # Get Metadata for Stocks
     for s in gc.ses.query(Stock).all():
         gc.writeJobStatus("Running", statusMessage=f'Enriching Stock {s.Name}')
         cId = engines.scaffold.enrichStock(gc, s)
     
+    # Get Stock Prices
     for s in gc.ses.query(Stock).all():
         gc.writeJobStatus("Running", statusMessage=f'Grabbing Stock {s.Name}')
         engines.grabstocks.grabStock(gc, s)
     
+    
+    # Fill/Update Notes Table
+    engines.scaffold.loadNotes(gc, "../data/Notizen.ods")
+    
+    
     if (gc.numErrors == 0):
-        gc.writeJobStatus("Completed", EndDate=datetime.datetime.now(), statusMessage="Completed OK")
+        gc.writeJobStatus("Completed", EndDate=datetime.datetime.now(), SuccessDate=datetime.datetime.now(), statusMessage="Completed OK")
     else:
         gc.writeJobStatus("ERROR", EndDate=datetime.datetime.now(), statusMessage=gc.errMsg)
         logger.error("")

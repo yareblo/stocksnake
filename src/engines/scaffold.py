@@ -14,11 +14,128 @@ from bs4 import BeautifulSoup
 import os
 
 from common.globalcontainer import GlobalContainer
+import engines.grabstocks
 
 import sys
 
 import re
 import pandas as pd
+import numpy as np
+
+import math
+import cexprtk
+
+from urllib import parse
+
+
+def addStock(gc, isin):
+    """This function adds a new Stock with the ISIN to the database and enriches it"""
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = f"Adding stock <{isin}>"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+        res = gc.ses.query(Stock).filter(Stock.ISIN == isin)
+                
+        if (res.count() == 0):
+            logger.debug(f'ISIN {isin} not found, creating...')
+            s = Stock(isin)
+            gc.ses.add(s)
+            gc.ses.commit()
+            enrichStock(gc, s)
+            engines.grabstocks.grabStock(gc, s)
+   
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+    except Exception as e:
+        logger.exception('Crash!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += "Crash loading stock {isin}; "
+    
+
+
+def loadNotes(gc, path):
+    """This will load the Notes-File and enrich it with the current Stock Price"""
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = f"Updating notes from {path}"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+        df_notes = pd.read_excel(path, engine = "odf")
+        
+        df_notes = df_notes.set_index('Id')
+        
+        df_notes['ISIN'] = df_notes['ISIN'].str.strip()
+        df_notes['Message'] = df_notes['Message'].str.strip()
+        df_notes['Condition'] = df_notes['Condition'].str.strip()
+        
+        df_notes['Value'] = None
+        df_notes['ValueDate'] = None
+        df_notes['CondResult'] = None
+
+        
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None): 
+            pass
+            #print(df_notes)
+        
+        # enrich with latest close date
+        for index, row in df_notes.iterrows():
+            isin = row['ISIN'].strip()
+            if (len(isin)==0):
+                continue
+            addStock(gc, isin)
+            qry = f'select time, close from StockValues where ISIN = \'{isin}\' order by time desc limit 1'
+            res = gc.influxClient.query(qry)
+            if len(res) > 0:
+                df_notes.at[index, 'ValueDate'] = res['StockValues'].index[0]
+                df_notes.at[index, 'Value'] = res['StockValues'].close[0]
+                
+            # Evaluate condition
+            cond = str(row['Condition'])
+            if (len(cond) > 3):
+                try:
+                    logger.debug(f"Evaluating condition {row['Condition']}")
+                    
+                    #r = cexprtk.evaluate_expression(cond, {"close" : res['StockValues'].close[0], "B" : 5, "C" : 23})
+                    r = gc.resolver.solve(cond, None, None, values={"close" : res['StockValues'].close[0]})
+                    df_notes.at[index, 'CondResult'] = r
+                    
+                    pass
+                except Exception as e:
+                    logger.exception('Crash!', exc_info=e)
+                    gc.errMsg += "Crash evaluating condition {row['Condition']}; "
+                    
+            
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None): 
+            pass
+            print(df_notes)
+        
+        # Write Notes to Database
+        logger.debug("Writing to Database")
+        
+        df_notes['Value'] = df_notes['Value'].astype(np.float32)
+        df_notes['CondResult'] = df_notes['CondResult'].astype(np.float32)
+        df_notes['ValueDate'] = pd.to_datetime(df_notes['ValueDate'])
+        df_notes['ValueDate'] = df_notes['ValueDate'].dt.tz_localize(None)
+        
+        print(df_notes.dtypes)
+        
+        df_notes.to_sql("notes", gc.eng, if_exists="replace")
+        
+        sys.exit()
+        
+        #df_stock = gc.influxClient.query(f'select close from StockValues where "ISIN" = \'{myISIN}\' AND Time >= \'{startDateString}\' ')['StockValues']
+        
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+    except Exception as e:
+        logger.exception('Crash!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += "Crash loading Notes; "
 
 
 
@@ -49,20 +166,50 @@ def loadStocks(gc, path):
         gc.errMsg += "Crash loading Stocks; "
 
 
-def enrichComId(gc, stock, soup, mkPlace):
+def enrichComId(gc, stock, soup, url, mkPlace):
     
     logger = logging.getLogger(__name__)
     
-    options = soup.find("select", {"id":"marketSelect"}).findAll("option", {"label": mkPlace})
-    if (len(options) > 0):
-        o = options[0]
-        stock.ComdirectId = o['value']
-        stock.Marketplace = o.text
-        logger.debug(f'Getting ComId {stock.ComdirectId} for place {stock.Marketplace} for ISIN {stock.ISIN}')
+    try:
+        gc.writeJobStatus("Running", statusMessage=f'Get ComId for stock {stock.ISIN}')
         
-        gc.ses.add(stock)
-        gc.ses.commit()
-        return 1
+        option_list = soup.find("select", {"id":"marketSelect"})
+        if option_list is not None:
+        
+            options = option_list.findAll("option", {"label": mkPlace})
+            if (len(options) > 0):
+                o = options[0]
+                stock.ComdirectId = o['value']
+                stock.Marketplace = o.text
+                logger.debug(f'Getting ComId {stock.ComdirectId} for place {stock.Marketplace} for ISIN {stock.ISIN}')
+                
+                gc.ses.add(stock)
+                gc.ses.commit()
+                return 1
+            else:
+                return 0
+        
+        logger.warn(f"No Marketplace found for {stock.ISIN}")
+        
+        # Check if there is no marketselect at all, example IE00B6897102
+        # Check for a specific location if there is the ISIN correctly located
+        res = soup.select_one("span.key-focus__identifier-type:nth-child(2)").next_sibling
+        if res is not None:
+            res = res.strip()
+            if (res == stock.ISIN):
+                # we take the redirect and extract the ID_NOTATION
+
+                p = parse.parse_qs(parse.urlsplit(url).query)
+                stock.ComdirectId = p['ID_NOTATION'][0]
+                stock.Marketplace = "default"
+                logger.debug(f'Getting ComId {stock.ComdirectId} for place {stock.Marketplace} for ISIN {stock.ISIN}')
+                
+                gc.ses.add(stock)
+                gc.ses.commit()
+                return 1
+    
+    except Exception as e:
+        logger.exception('Crash!', exc_info=e)
     
     return 0
 
@@ -72,6 +219,8 @@ def enrichStock(gc, stock):
     logger = logging.getLogger(__name__)
     
     try:
+        gc.writeJobStatus("Running", statusMessage=f'Enriching stock {stock.ISIN}')
+        
         page = requests.get(f'https://www.comdirect.de/inf/search/all.html?SEARCH_VALUE={stock.ISIN}')
         if (page.status_code != 200):
             logger.error(f'Could not get Searchpage for {stock.ISIN}')
@@ -79,9 +228,17 @@ def enrichStock(gc, stock):
         soup = BeautifulSoup(page.content, 'html.parser')
         
         # Get ComdirectId
+        found = False
         for mp in [stock.PreferredMarketplace, 'Xetra', 'gettex', 'Tradegate', 'Frankfurt']:
-            if (enrichComId(gc, stock, soup, mp) > 0):
+            if (enrichComId(gc, stock, soup, page.url, mp) > 0):
+                found=True
                 break
+        
+        if (found == False):
+            msg = f"No Comdirect-Id found for ISIN {stock.ISIN}"
+            logger.error(msg)
+            gc.errMsg += (msg + "; ")
+            return
         
         # Get Name and type
         #
@@ -129,12 +286,19 @@ def enrichStock(gc, stock):
 
             # Extract WKN
             #
-            dfw = (df.loc[df[0] == "WKN"])
-            if (len(dfw.index) >0):
-                stock.WKN = dfw.iloc[0][1].strip()
+            res = soup.select_one("span.key-focus__identifier-type:nth-child(1)").next_sibling
+            if res is not None:
+                stock.WKN = res.strip()
+            else:    
+                dfw = (df.loc[df[0] == "WKN"])
+                if (len(dfw.index) >0):
+                    stock.WKN = dfw.iloc[0][1].strip()
                 
             # Extract Type
             #
+                    
+                 #   div.col-4:nth-child(8) > div:nth-child(1) > table:nth-child(2) > tbody:nth-child(1) > tr:nth-child(1) > td:nth-child(2) > a:nth-child(1)
+                    
             dfw = (df.loc[df[0] == "Wertpapiertyp"])
             if (len(dfw.index) >0):
                 stock.StockType = "Aktie"
