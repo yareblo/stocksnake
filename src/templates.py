@@ -10,10 +10,12 @@ import logging
 
 def addStock(gc, ISIN):
     """CHANGE ME"""
+    
+    loc = locals()
     logger = logging.getLogger(__name__)
     
     try:
-        msg = f"Starting xxx with {ISIN}"
+        msg = f"Starting xxx with {loc}"
         logger.debug(msg)
         gc.writeJobStatus("Running", statusMessage=msg)
         
@@ -23,6 +25,6 @@ def addStock(gc, ISIN):
         gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
         logger.debug(msg + " - DONE")
     except Exception as e:
-        logger.exception('Crash!', exc_info=e)
+        logger.exception(f'Crash xxx with {loc}!', exc_info=e)
         gc.numErrors += 1
-        gc.errMsg += "Crash loading Notes; "
+        gc.errMsg += f"Crash xxx with {loc}; "

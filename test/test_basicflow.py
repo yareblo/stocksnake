@@ -14,6 +14,7 @@ import unittest
 import common.globalcontainer as glob
 from dataobjects.stock import Stock
 import engines.scaffold
+import engines.analysis
 import pandas as pd
 
 
@@ -25,7 +26,7 @@ class TestGC(unittest.TestCase):
         """
         Test general GlobalContainer-Functions
         """
-        self.gc = glob.GlobalContainer("config-test.cfg", "TestRun")
+
         
         self.gc.resetMySQLDatabases()
         self.gc.resetInfluxDatabases()
@@ -91,12 +92,23 @@ class TestGC(unittest.TestCase):
         df_distri = pd.read_excel(f"{self.gc.data_root}TargetDistribution.ods", engine = "odf")
         df_distri['ISIN'] = df_distri['ISIN'].str.strip()
         df_distri['Depot'] = df_distri['Depot'].str.strip()
-
         
+        for myDepot in df_trans['Depot'].unique():
+            df_full = engines.analysis.buildDepot(self.gc, df_trans, df_distri, myDepot)
+            df_full.to_excel(f"{self.gc.data_root}Depot-{myDepot}.ods", engine = "odf")
+
+        # Check some Results
+        qry = f'select * from Depots where Depot = \'Dep_01\' order by time desc limit 1'
+        res = self.gc.influxClient.query(qry)['Depots']
+        
+        self.assertEqual(3975, res.iloc[0]['Invested-total'], "Total investment in depot Dep_01")
+        self.assertEqual(4000, res.iloc[0]['Value-total'], "Total value in depot Dep_01")
+        self.assertEqual(400, round(res.iloc[0]['delta-TEST0001'], 4), "Difference TEST0001 to ideal distribution")
+
         
     def step999(self):
         
-        self.assertEqual(self.gc.numErrors, 0)
+        self.assertEqual(self.gc.numErrors, 0, f"Error-Message: {self.gc.errMsg}")
         
         self.gc.eng.dispose()
         
@@ -105,19 +117,27 @@ class TestGC(unittest.TestCase):
     def _steps(self):
         for name in dir(self): # dir() result is implicitly sorted
             if name.startswith("step"):
-                yield name, getattr(self, name) 
+                num = int(name[4:])
+                yield name, num, getattr(self, name) 
 
     def test_steps(self):
-        for name, step in self._steps():
+        
+        self.gc = glob.GlobalContainer("config-test.cfg", "TestRun")
+        
+        for name, num, step in self._steps():
             try:
-                step()
+                if(num > -3):
+                    step()
             except Exception as e:
-                print("####################### Disposing Engine #######################")
-                self.gc.eng.dispose()
+
                 self.fail("{} failed ({}: {})".format(step, type(e), e))
+            finally:
+                print("####################### Disposing Engine #######################")
+                self.gc.ses.commit()
+                self.gc.ses.close()
+                self.gc.eng.dispose()
                 
-        print("####################### Disposing Engine #######################")
-        self.gc.eng.dispose()
+
 
 
 if __name__ == '__main__':

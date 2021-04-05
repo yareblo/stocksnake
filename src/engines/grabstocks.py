@@ -13,7 +13,35 @@ import numpy as np
 import sys
 import datetime
 from dataobjects.stock import Stock
+import random
 
+
+def getFirstDate(gc, isin):
+    
+    qry = f'select time, close from StockValues where ISIN = \'{isin}\' order by time asc limit 1'
+    res = gc.influxClient.query(qry)
+    
+    if len(res) > 0:
+        return res['StockValues'].index[0]
+    
+    msg = f"No first date found for {isin}"
+    gc.numWarnings += 1
+    gc.warnMsg += msg + "; "
+    return None
+
+def getLastDate(gc, isin):
+    
+    qry = f'select time, close from StockValues where ISIN = \'{isin}\' order by time desc limit 1'
+    res = gc.influxClient.query(qry)
+    
+    if len(res) > 0:
+        return res['StockValues'].index[0]
+    
+    msg = f"No last date found for {isin}"
+    gc.numWarnings += 1
+    gc.warnMsg += msg + "; "
+    
+    return None
 
 
 def grabStock(gc, stock):
@@ -112,15 +140,18 @@ def createTestStocks(gc):
         logger.debug(msg)
         gc.writeJobStatus("Running", statusMessage=msg)
         
-        N = 20
-        start = '2021-03-01'
+        random.seed(4711)
+
+        start_short = '2021-03-01'
+        start_long = '2000-01-01'
+        end = '2021-03-31'
         
         s = Stock('TEST0001')
         s.NameShort = "TestStock 100"
         s.ComdirectId = -1
         gc.ses.add(s)
         gc.ses.commit()
-        rng = pd.date_range(start, periods = N, freq='D')
+        rng = pd.bdate_range(start_short, end)
         df = pd.DataFrame({'open': 100.0, 'high': 100.0, 'low': 100.0, 'close': 100.0, 'volume': 100.0 }, index = rng) 
         gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
 
@@ -133,13 +164,28 @@ def createTestStocks(gc):
         gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
 
         s = Stock('TEST0003')
-        s.NameShort = "TestStock Ascending"
+        s.NameShort = "TestStock linear ascending"
         s.ComdirectId = -1
         gc.ses.add(s)
         gc.ses.commit()
-        val = np.arange(100.0, 100.0 + N, 1.0)
+        val = np.arange(100.0, 100.0 + len(rng), 1.0)
         df = pd.DataFrame({'open': val, 'high': val, 'low': val, 'close': val, 'volume': val }, index = rng) 
         gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+    
+        interestStock(gc, "TEST0010", 1, start_long, end, 0, 0.0)
+        interestStock(gc, "TEST0011", 5, start_long, end, 0, 0.0)
+        interestStock(gc, "TEST0012", 10, start_long, end, 0, 0.0)
+        interestStock(gc, "TEST0013", -1, start_long, end, 0, 0.0)
+        interestStock(gc, "TEST0014", -5, start_long, end, 0, 0.0)
+        interestStock(gc, "TEST0015", -10, start_long, end, 0, 0.0)
+        
+        interestStock(gc, "TEST0020", 1, start_long, end, 5, 0.01)
+        interestStock(gc, "TEST0021", 5, start_long, end, 5, 0.01)
+        interestStock(gc, "TEST0022", 10, start_long, end, 5, 0.01)
+        interestStock(gc, "TEST0023", -1, start_long, end, 5, 0.01)
+        interestStock(gc, "TEST0024", -5, start_long, end, 5, 0.01)
+        interestStock(gc, "TEST0025", -10, start_long, end, 5, 0.02)
+
     
         gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
         logger.debug(msg + " - DONE")
@@ -150,3 +196,32 @@ def createTestStocks(gc):
         logger.exception('Crash!', exc_info=e)
         gc.numErrors += 1
         gc.errMsg += "Crash createTestStocks; "
+        
+        
+        
+def interestStock(gc, isin, int_rate, start, end, jitter, momentum):
+    
+    s = Stock(isin)
+    s.NameShort = f"TestStock interest {int_rate}%, jitter {jitter}, momentum {momentum}"
+    s.ComdirectId = -1
+    gc.ses.add(s)
+    gc.ses.commit()
+    rng = pd.bdate_range(start, end)
+    val = [100.0] * len(rng)
+    pos = val[0]
+    for i in range(len(val)):
+        if (jitter > 0):
+            pos0 = 100 * (1+int_rate/100) ** ((rng[i] - rng[0]).days / 365.25) # value without jitter
+            d = pos0 - pos
+            #step = random.uniform(-jitter + d*momentum, jitter + d*momentum)
+            step = random.uniform(-min(jitter - d*momentum, pos-0.1), (jitter + d*momentum))
+            pos = pos + step
+            val[i] = pos
+        else:
+            val[i] = 100 * (1+int_rate/100) ** ((rng[i] - rng[0]).days / 365.25)
+        
+        
+    df = pd.DataFrame({'open': val, 'high': val, 'low': val, 'close': val, 'volume': val }, index = rng) 
+    gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line', batch_size=500)
+        
+        

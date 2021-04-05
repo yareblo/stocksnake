@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 import os
 
-from common.globalcontainer import GlobalContainer
+#from common.globalcontainer import GlobalContainer
 import engines.grabstocks
 
 import sys
@@ -29,7 +29,7 @@ from urllib import parse
 
 
 def addStock(gc, isin):
-    """This function adds a new Stock with the ISIN to the database and enriches it"""
+    """This function adds a new Stock with the ISIN to the database, enriches it and grabs all values"""
     logger = logging.getLogger(__name__)
     
     try:
