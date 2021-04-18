@@ -41,6 +41,7 @@ class GlobalContainer(object):
     influx_port = "8086"
     influx_user = ""
     influx_pwd = ""
+    influx_token = "*token*"
     influx_db = "stock"
     influxClient = None
     
@@ -131,6 +132,7 @@ class GlobalContainer(object):
             
             config['InfluxDB'] = {'Host': self.influx_host,
                                   'Port': self.influx_port,
+                                  'Token': self.influx_token,
                                   'Database': self.influx_db}
             
             config['MySQL'] = {'Host': self.mysql_host,
@@ -163,6 +165,7 @@ class GlobalContainer(object):
             self.influx_host = configParser.get('InfluxDB', 'Host', fallback = self.influx_host)
             self.influx_port = int(configParser.get('InfluxDB', 'Port', fallback = self.influx_port))
             self.influx_db = configParser.get('InfluxDB', 'Database', fallback = self.influx_db)
+            self.influx_token = configParser.get('InfluxDB', 'Token', fallback = self.influx_token)
             
             self.mysql_host = configParser.get('MySQL', 'Host', fallback = self.mysql_host)
             self.mysql_user = configParser.get('MySQL', 'User', fallback = self.mysql_user)

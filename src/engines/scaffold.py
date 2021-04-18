@@ -27,6 +27,8 @@ import cexprtk
 
 from urllib import parse
 
+import datetime
+
 
 def addStock(gc, isin):
     """This function adds a new Stock with the ISIN to the database, enriches it and grabs all values"""
@@ -46,9 +48,14 @@ def addStock(gc, isin):
             gc.ses.commit()
             enrichStock(gc, s)
             engines.grabstocks.grabStock(gc, s)
+        else:
+            s = res[0]
    
         gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
         logger.debug(msg + " - DONE")
+        
+        return s
+    
     except Exception as e:
         logger.exception('Crash!', exc_info=e)
         gc.numErrors += 1
@@ -126,7 +133,7 @@ def loadNotes(gc, path):
         
         df_notes.to_sql("notes", gc.eng, if_exists="replace")
         
-        sys.exit()
+        #sys.exit()
         
         #df_stock = gc.influxClient.query(f'select close from StockValues where "ISIN" = \'{myISIN}\' AND Time >= \'{startDateString}\' ')['StockValues']
         
@@ -175,8 +182,15 @@ def enrichComId(gc, stock, soup, url, mkPlace):
         
         option_list = soup.find("select", {"id":"marketSelect"})
         if option_list is not None:
-        
-            options = option_list.findAll("option", {"label": mkPlace})
+            
+            if (mkPlace is not None):
+            # if mkPlace is not none, we look for the specific place
+                options = option_list.findAll("option", {"label": mkPlace})
+                
+            else:
+            # we take the selected available one
+                options = option_list.findAll("option", {"selected": 'selected'})
+                
             if (len(options) > 0):
                 o = options[0]
                 stock.ComdirectId = o['value']
@@ -188,6 +202,8 @@ def enrichComId(gc, stock, soup, url, mkPlace):
                 return 1
             else:
                 return 0
+
+                
         
         logger.warn(f"No Marketplace found for {stock.ISIN}")
         
@@ -229,7 +245,7 @@ def enrichStock(gc, stock):
         
         # Get ComdirectId
         found = False
-        for mp in [stock.PreferredMarketplace, 'Xetra', 'gettex', 'Tradegate', 'Frankfurt']:
+        for mp in [stock.PreferredMarketplace, 'Xetra', 'gettex', 'Tradegate', 'Frankfurt', None]:
             if (enrichComId(gc, stock, soup, page.url, mp) > 0):
                 found=True
                 break
@@ -268,8 +284,8 @@ def enrichStock(gc, stock):
                 for row_item in body[row_num].find_all("td"):
                     # row_item.text removes the tags from the entries
                     # the following regex is to remove \xa0 and \n and comma from row_item.text
-                    # xa0 encodes the flag, \n is the newline and comma separates thousands in numbers
-                    aa = re.sub("(\xa0)|(\n)|,","",row_item.text)
+                    # xa0 encodes the flag, \n is the newline and dot separates thousands in numbers
+                    aa = re.sub(r"(\xa0)|(\n)|,","",row_item.text)
                     #append aa to row - note one row entry is being appended
                     row.append(aa)
                 # append one row to all_rows
@@ -321,6 +337,8 @@ def enrichStock(gc, stock):
         gc.ses.add(stock)
         gc.ses.commit()
         
+        # Get 
+    
     
         #logger.error(f'No Comdirect-Id found for ISIN {stock.ISIN}')
     
@@ -330,7 +348,179 @@ def enrichStock(gc, stock):
         gc.errMsg += f'Crash enriching Stock {stock.ISIN}; '
 
 
+def getETFDistributions_old(gc, stock):
+    """CHANGE ME"""
+    
+    loc = locals()
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = f"Starting getCountries with {stock.ISIN}"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+        
+        page = requests.get(f'https://www.comdirect.de/inf/etfs/detail/uebersicht.html?ID_NOTATION={stock.ComdirectId}')
+        if (page.status_code != 200):
+            logger.error(f'Could not get Searchpage for {stock.ISIN}')
+    
+        soup = BeautifulSoup(page.content, 'html.parser')
+        
+        ts = datetime.datetime.now()
+        
+        # Scrape Verteilungen. Folgende Annahme:
+        # 1. Tabelle: Branchen
+        # 2. Tabelle: Aktien
+        # 3. Tabelle: Länder
+        # 4. Tabelle: Währungen
+        #
+        tbl_content = ['Industry', 'Stock', 'County', 'Currency']
+        df_data = pd.DataFrame(columns=['Date', 'ISIN', 'Type', 'Name', 'Percent'])
+        #
+        tbl_count = -1
+        tables = soup.find_all("table", {"class": "table--list"})
+        for table in tables:
+            tbl_count += 1
+            body = table.find_all("tr")
+            
+            all_rows = []
+            for row_num in range(len(body)):
+                row = []
+                for row_item in body[row_num].find_all("td"):
+                    # row_item.text removes the tags from the entries
+                    # the following regex is to remove \xa0 and \n and comma from row_item.text
+                    # xa0 encodes the flag, \n is the newline and comma separates thousands in numbers
+                    aa = re.sub("(\xa0)|(\n)|\.","",row_item.text)
+                    #append aa to row - note one row entry is being appended
+                    row.append(aa)
+                # append one row to all_rows
+                all_rows.append(row)
+        
+            # df = pd.DataFrame(data=all_rows,columns=headings)
+            df = pd.DataFrame(data=all_rows)
 
+            df = df.rename(columns={1: "Percent", 2: "Name"})
+            
+            df['Type'] = tbl_content[tbl_count]
+            
+            df_data = df_data.append(df, ignore_index = True)
+                        
+        df_data['ISIN'] = stock.ISIN
+        df_data['Date'] = ts
+        
+        df_data['Percent'] = df_data['Percent'].str.replace(',', '.').str.rstrip('%').astype('float') / 100.0
+            
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None): 
+            print(df_data)
+            pass
+
+        df_data.to_sql("etf_details", gc.eng, if_exists="append")
+    
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+    except Exception as e:
+        logger.exception(f'Crash getCountries with {stock.ISIN}!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += f"Crash getCountries with {stock.ISIN}; "
+
+
+def getSubTable(soup, text):
+    """ gets the next table after 'text' and returns it as dataframe """
+    
+    df = pd.DataFrame()
+    
+    searchtext = re.compile(text,re.IGNORECASE)
+    foundtext = soup.find('h3',text=searchtext) # Find the first <p> tag with the search text
+    if (foundtext is not None):
+        table = foundtext.findNext('table') # Find the first <table> tag that follows it
+        body = table.findAll('tr')
+        
+        all_rows = []
+        for row_num in range(len(body)):
+            row = []
+            for row_item in body[row_num].find_all("td"):
+                
+                # Check if we have a span, because this has more informatione
+                res = row_item.find('span')
+                if ((res is not None) and (res.has_attr('title'))):
+                    aa = res['title']
+                else:
+                    # row_item.text removes the tags from the entries
+                    # the following regex is to remove \xa0 and \n and comma from row_item.text
+                    # xa0 encodes the flag, \n is the newline and comma separates thousands in numbers
+                    aa = re.sub("(\xa0)|(\n)|\.|(\r)","",row_item.text)
+                    
+                #append aa to row - note one row entry is being appended
+                row.append(aa)
+            # append one row to all_rows
+            all_rows.append(row)
+    
+        # df = pd.DataFrame(data=all_rows,columns=headings)
+        df = pd.DataFrame(data=all_rows)
+        df = df.rename(columns={1: "Percent", 2: "Name"})
+    
+    return df
+    
+
+def getFondDistributions(gc, stock):
+    """Gets the distributions of a Fond by country, Currency, Position, Industry,... from the comdirect page"""
+    
+    loc = locals()
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = f"Starting getFondDistributions with {stock.ISIN}"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+        
+        page = requests.get(f'https://www.comdirect.de/inf/etfs/detail/uebersicht.html?ID_NOTATION={stock.ComdirectId}')
+        if (page.status_code != 200):
+            logger.error(f'Could not get Searchpage for {stock.ISIN}')
+    
+        soup = BeautifulSoup(page.content, 'html.parser')
+        
+        df_data = pd.DataFrame(columns=['Date', 'ISIN', 'Type', 'Name', 'Percent'])
+        ts = datetime.datetime.now()
+        
+        # Positions
+        df = getSubTable(soup, "Größte Positionen")
+        df['Type'] = "Stock" 
+        df_data = df_data.append(df, ignore_index = True)
+        
+        # Countries
+        df = getSubTable(soup, "Länder")
+        df['Type'] = "Countries" 
+        df_data = df_data.append(df, ignore_index = True)
+        
+        # Currencies
+        df = getSubTable(soup, "Währungen")
+        df['Type'] = "Currencies" 
+        df_data = df_data.append(df, ignore_index = True)
+        
+        # Countries
+        df = getSubTable(soup, "Bestandteile")
+        df['Type'] = "Industries" 
+        df_data = df_data.append(df, ignore_index = True)
+        
+        
+        df_data['ISIN'] = stock.ISIN
+        df_data['Date'] = ts
+        
+        df_data['Percent'] = df_data['Percent'].str.replace(',', '.').str.rstrip('%').astype('float') / 100.0
+
+        
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None): 
+            print(df_data)
+
+        df_data.to_sql("fonds_details", gc.eng, if_exists="append")
+    
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+    except Exception as e:
+        logger.exception(f'Crash getCountries with {stock.ISIN}!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += f"Crash getCountries with {stock.ISIN}; "
 
 
 # configFile = "config.cfg"
