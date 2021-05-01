@@ -22,6 +22,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 from influxdb import DataFrameClient
+from influxdb_client import InfluxDBClient, WriteOptions, BucketRetentionRules
+from influxdb_client.client.write_api import SYNCHRONOUS, WriteType
+from influxdb_client.client.write.retry import WritesRetry
 
 from dataobjects.scriptStatus import ScriptStatus
 from engines.resolver import Resolver
@@ -43,7 +46,11 @@ class GlobalContainer(object):
     influx_pwd = ""
     influx_token = "*token*"
     influx_db = "stock"
+    influx_org = "My-Org"
+    influx_version = 2
     influxClient = None
+    influx_query_api = None
+    influx_write_api = None
     
     mysql_host = "localhost"
     mysql_user = "stocksnake_usr"
@@ -133,7 +140,9 @@ class GlobalContainer(object):
             config['InfluxDB'] = {'Host': self.influx_host,
                                   'Port': self.influx_port,
                                   'Token': self.influx_token,
-                                  'Database': self.influx_db}
+                                  'Organization': self.influx_org,
+                                  'Version': self.influx_version,
+                                  'Database-Bucket': self.influx_db}
             
             config['MySQL'] = {'Host': self.mysql_host,
                                'User': self.mysql_user,
@@ -164,8 +173,10 @@ class GlobalContainer(object):
             
             self.influx_host = configParser.get('InfluxDB', 'Host', fallback = self.influx_host)
             self.influx_port = int(configParser.get('InfluxDB', 'Port', fallback = self.influx_port))
-            self.influx_db = configParser.get('InfluxDB', 'Database', fallback = self.influx_db)
+            self.influx_db = configParser.get('InfluxDB', 'Database-Bucket', fallback = self.influx_db)
+            self.influx_version = int(configParser.get('InfluxDB', 'Version', fallback = self.influx_version))
             self.influx_token = configParser.get('InfluxDB', 'Token', fallback = self.influx_token)
+            self.influx_org = configParser.get('InfluxDB', 'Organization', fallback = self.influx_org)
             
             self.mysql_host = configParser.get('MySQL', 'Host', fallback = self.mysql_host)
             self.mysql_user = configParser.get('MySQL', 'User', fallback = self.mysql_user)
@@ -204,7 +215,29 @@ class GlobalContainer(object):
         try:
             # prepare database
             self.logger.debug(f'Connecting to Influx with: Host:{self.influx_host}, Port: {self.influx_port}, User: {self.influx_user}, DB: {self.influx_db}')
-            self.influxClient = DataFrameClient(self.influx_host, self.influx_port, self.influx_user, self.influx_pwd, self.influx_db)
+            if (self.influx_version == 1):
+                pass
+                self.influxClient = DataFrameClient(self.influx_host, self.influx_port, self.influx_user, self.influx_pwd, self.influx_db)
+                
+            elif (self.influx_version == 2):
+                
+                
+                retries = WritesRetry(total=20, backoff_factor=1, exponential_base=1)
+                
+                self.influxClient = InfluxDBClient(url=f"http://{self.influx_host}:{self.influx_port}", 
+                                                   token=self.influx_token, org=self.influx_org, retries=retries)
+                
+                self.influx_query_api = self.influxClient.query_api()
+            
+                self.influx_write_api = self.influxClient.write_api(write_options=WriteOptions(batch_size=500, write_type=WriteType.synchronous,
+                                                          flush_interval=10_000,
+                                                          jitter_interval=2_000,
+                                                          retry_interval=5_000,
+                                                          max_retries=5,
+                                                          max_retry_delay=30_000,
+                                                          exponential_base=2)) 
+                #self.influx_write_api = self.influxClient.write_api(write_options=SYNCHRONOUS)
+                
             
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
@@ -236,12 +269,29 @@ class GlobalContainer(object):
         try:
             self.logger.warning("Resetting Influx-Database")
             
-            self.influxClient.drop_database(self.influx_db)
-            self.influxClient.create_database(self.influx_db)
-            
+            if (self.influx_version == 1):
+                self.influxClient.drop_database(self.influx_db)
+                self.influxClient.create_database(self.influx_db)
+            else:
+                buckets_api = self.influxClient.buckets_api()
+                
+                buckets = buckets_api.find_buckets().buckets
+                my_bucket = None
+                for b in buckets:
+                    if (b.name == self.influx_db):
+                        my_bucket = b
+                
+                if (my_bucket is not None):
+                    buckets_api.delete_bucket(my_bucket)
+                
+                org_name = self.influx_org
+                org = list(filter(lambda it: it.name == org_name, self.influxClient.organizations_api().find_organizations()))[0]
+                #retention_rules = BucketRetentionRules(type="expire", every_seconds=3600)
+                created_bucket = buckets_api.create_bucket(bucket_name = self.influx_db,  org_id = org.id)
             
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
+            sys.exit(-99)
             
             
     def writeJobStatus(self, Status, StartDate=None, EndDate=None, statusMessage=None, SuccessDate=None):
@@ -286,4 +336,6 @@ class GlobalContainer(object):
             self.logger.exception('Crash!', exc_info=e)
             
             
+    def chunk(self, seq, size):
+        return (seq[pos:pos + size] for pos in range(0, len(seq), size))
             

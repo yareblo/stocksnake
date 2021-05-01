@@ -42,6 +42,7 @@ try:
     logger.info(f'Debug-Mode:        {gc.debug_mode}')
     ts = os.path.getmtime(__file__)
     logger.info(f"Last modified on:  {datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f'Config-File:       {configFile}')
     logger.info(f'Logfile:           {gc.log_path}')
     logger.info(f"Loglevel:          {l}")
     logger.setLevel(l)

@@ -54,19 +54,34 @@ def grabStock(gc, stock):
        
         logger.info(f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
         gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
-        # get timestamp of latest point
-        qry = f'select time, close from StockValues where ISIN = \'{stock.ISIN}\' order by time desc limit 1'
-        res = gc.influxClient.query(qry)
-        #print (type(res))
-        #print(res)
         
-        startDate = "01.01.1972"
+        startDate = "01.01.1900"
         endDate = datetime.datetime.now().strftime("%d.%m.%Y")
         
-        if len(res) > 0:
-            ts = res['StockValues'].index[0]
-            ts = ts - datetime.timedelta(days=2)
-            startDate = ts.strftime("%d.%m.%Y")
+        if (gc.influx_version == 1):
+            # get timestamp of latest point
+            qry = f'select time, close from StockValues where ISIN = \'{stock.ISIN}\' order by time desc limit 1'
+            res = gc.influxClient.query(qry)
+            
+            if len(res) > 0:
+                ts = res['StockValues'].index[0]
+                ts = ts - datetime.timedelta(days=2)
+                startDate = ts.strftime("%d.%m.%Y")
+            
+        else:
+            qry = f'from(bucket: \"{gc.influx_db}\") \
+                        |> range(start: 0)  \
+                        |> filter(fn: (r) => \
+                            r.ISIN == \"{stock.ISIN}\" and r._field == \"close\")   \
+                        |> sort(columns: ["_time"], desc: true) \
+                        |> first()'
+            res = gc.influx_query_api.query_data_frame(qry)
+            
+            if len(res) > 0:
+                ts = res.loc[0]['_time']
+                ts = ts - datetime.timedelta(days=2)
+                startDate = ts.strftime("%d.%m.%Y")
+                #print(startDate)
         
         logger.debug(f'StartDate: {startDate}, EndDate: {endDate}')
         
@@ -116,7 +131,15 @@ def grabStock(gc, stock):
         timeValues.index = df.index
 
         logger.debug(f'Writing {len(df.index)} rows to InfluxDB for stock {stock.Name}')
-        gc.influxClient.write_points(df, "StockValues", {'ISIN': stock.ISIN, 'Name': stock.NameShort}, protocol='line', batch_size=500)
+        
+        saveStock(gc, df, stock)
+        
+        # if (gc.influx_version == 1):
+        #     gc.influxClient.write_points(df, "StockValues", {'ISIN': stock.ISIN, 'Name': stock.NameShort}, protocol='line', batch_size=500)
+        # else:
+        #     df['ISIN'] = stock.ISIN
+        #     df['Name'] = stock.Name
+        #     gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN', 'Name'])
         
         gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN} - DONE')
     
@@ -153,15 +176,30 @@ def createTestStocks(gc):
         gc.ses.commit()
         rng = pd.bdate_range(start_short, end)
         df = pd.DataFrame({'open': 100.0, 'high': 100.0, 'low': 100.0, 'close': 100.0, 'volume': 100.0 }, index = rng) 
-        gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
-
+        
+        saveStock(gc, df, s)
+        # if (gc.influx_version == 1):
+        #     gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+        # else:
+        #     df['ISIN'] = s.ISIN
+        #     df['Name'] = s.NameShort
+        #     gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN', 'Name'])
+ 
         s = Stock('TEST0002')
         s.NameShort = "TestStock 200"
         s.ComdirectId = -1
         gc.ses.add(s)
         gc.ses.commit()
         df = pd.DataFrame({'open': 200.0, 'high': 200.0, 'low': 200.0, 'close': 200.0, 'volume': 200.0 }, index = rng) 
-        gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+        
+        saveStock(gc, df, s)
+        # if (gc.influx_version == 1):
+        #     gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+        # else:
+        #     df['ISIN'] = s.ISIN
+        #     df['Name'] = s.NameShort
+        #     gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN', 'Name'])
+ 
 
         s = Stock('TEST0003')
         s.NameShort = "TestStock linear ascending"
@@ -170,8 +208,15 @@ def createTestStocks(gc):
         gc.ses.commit()
         val = np.arange(100.0, 100.0 + len(rng), 1.0)
         df = pd.DataFrame({'open': val, 'high': val, 'low': val, 'close': val, 'volume': val }, index = rng) 
-        gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
-    
+        
+        saveStock(gc, df, s)
+        # if (gc.influx_version == 1):
+        #     gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+        # else:
+        #     df['ISIN'] = s.ISIN
+        #     df['Name'] = s.NameShort
+        #     gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN', 'Name'])
+   
         interestStock(gc, "TEST0010", 1, start_long, end, 0, 0.0)
         interestStock(gc, "TEST0011", 5, start_long, end, 0, 0.0)
         interestStock(gc, "TEST0012", 10, start_long, end, 0, 0.0)
@@ -222,6 +267,49 @@ def interestStock(gc, isin, int_rate, start, end, jitter, momentum):
         
         
     df = pd.DataFrame({'open': val, 'high': val, 'low': val, 'close': val, 'volume': val }, index = rng) 
-    gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line', batch_size=500)
+    
+    saveStock(gc, df, s)
+        # if (gc.influx_version == 1):
+        #     gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+        # else:
+        #     df['ISIN'] = s.ISIN
+        #     df['Name'] = s.NameShort
+        #     gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN', 'Name'])
+ 
+
+        
+def saveStock(gc, df, s):
+    """Saves the content of Dataframe DF to the InfluxDB for stock s"""
+    
+    loc = locals()
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = f"Starting saveStock for {s.ISIN}"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+        if (gc.influx_version == 1):
+            gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+        else:
+            df['ISIN'] = s.ISIN
+            df['Name'] = s.NameShort
+            
+            x = 0
+            step = 200
+            for df_chunk in gc.chunk(df, step):
+                logger.debug(f"Saving {x} of {len(df.index)}...")
+                x += step
+                gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df_chunk, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN', 'Name'])
+ 
+    
+    
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+    except Exception as e:
+        logger.exception(f'Crash saveStock with {loc}!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += f"Crash saveStock with {loc}; "
         
         
+

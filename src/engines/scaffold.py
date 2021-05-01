@@ -183,7 +183,7 @@ def enrichComId(gc, stock, soup, url, mkPlace):
         option_list = soup.find("select", {"id":"marketSelect"})
         if option_list is not None:
             
-            if (mkPlace is not None):
+            if (mkPlace != "*default*"):
             # if mkPlace is not none, we look for the specific place
                 options = option_list.findAll("option", {"label": mkPlace})
                 
@@ -245,7 +245,7 @@ def enrichStock(gc, stock):
         
         # Get ComdirectId
         found = False
-        for mp in [stock.PreferredMarketplace, 'Xetra', 'gettex', 'Tradegate', 'Frankfurt', None]:
+        for mp in [stock.PreferredMarketplace, 'Xetra', 'gettex', 'Tradegate', 'Frankfurt', '*default*']:
             if (enrichComId(gc, stock, soup, page.url, mp) > 0):
                 found=True
                 break

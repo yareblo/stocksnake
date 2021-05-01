@@ -26,7 +26,6 @@ class TestGC(unittest.TestCase):
         """
         Test general GlobalContainer-Functions
         """
-
         
         self.gc.resetMySQLDatabases()
         self.gc.resetInfluxDatabases()
@@ -36,9 +35,12 @@ class TestGC(unittest.TestCase):
         res = self.gc.ses.query(Stock).all()
         
         self.assertIsNotNone(self.gc.influxClient)
-        df = self.gc.influxClient.query("select * from StockValues")
+        # df = self.gc.influxClient.query("select * from StockValues")
+        q = f"from(bucket: \"{self.gc.influx_db}\") |> range(start: 0) |> count()"
+        df = self.gc.influx_query_api.query_data_frame(q)
+        # print(df)
 
-        self.assertEqual(len(df),0)
+        #self.assertEqual(len(df),0, f"Bucket {self.gc.influx_db} not empty")
         
     def step002(self):
         """Stock Enrichment"""
@@ -50,6 +52,7 @@ class TestGC(unittest.TestCase):
         self.assertEqual("766403", s.WKN)
         self.assertEqual("176173", s.ComdirectId)
         self.assertEqual("Aktie", s.StockType)
+        self.assertEqual("Xetra", s.Marketplace)
         
         
         # Fond Arero
@@ -59,6 +62,7 @@ class TestGC(unittest.TestCase):
         self.assertEqual("DWS0R4", s.WKN)
         self.assertEqual("120490287", s.ComdirectId)
         self.assertEqual("Fonds", s.StockType)
+        self.assertEqual("gettex", s.Marketplace)
         
         
         # ETF
@@ -78,8 +82,17 @@ class TestGC(unittest.TestCase):
             engines.grabstocks.grabStock(self.gc, s)
             
             #Load and check if something was loaded
-            df_stock = self.gc.influxClient.query(f'select close from StockValues where "ISIN" = \'{s.ISIN}\'')['StockValues']
-            l = len(df_stock.index)
+            if (self.gc.influx_version == 1):
+                df_stock = self.gc.influxClient.query(f'select close from StockValues where "ISIN" = \'{s.ISIN}\'')['StockValues']
+                l = len(df_stock.index)
+            else:
+                qry = f'from(bucket: \"{self.gc.influx_db}\") \
+                        |> range(start: 0)  \
+                        |> filter(fn: (r) => \
+                            r.ISIN == \"{s.ISIN}\" and r._field == \"close\")'
+                df_stock = self.gc.influx_query_api.query_data_frame(qry)
+                l = len(df_stock.index)
+            
             self.assertTrue(l > 10, f"{l} is not enough prices for {s.ISIN}")
 
 
@@ -98,8 +111,30 @@ class TestGC(unittest.TestCase):
             df_full.to_excel(f"{self.gc.data_root}Depot-{myDepot}.ods", engine = "odf")
 
         # Check some Results
-        qry = f'select * from Depots where Depot = \'Dep_01\' order by time desc limit 1'
-        res = self.gc.influxClient.query(qry)['Depots']
+        if (self.gc.influx_version == 1):
+            qry = f'select * from Depots where Depot = \'Dep_01\' order by time desc limit 1'
+            res = self.gc.influxClient.query(qry)['Depots']
+        else:
+            qry = f'from(bucket: \"{self.gc.influx_db}\") \
+                        |> range(start: 1900-01-01T00:00:00.000000000Z)  \
+                        |> filter(fn: (r) => \
+                            r._measurement == \"Depots\" and \
+                            r.Depot == \"Dep_01\")  \
+                        |> pivot(rowKey:["_time"], \
+                                 columnKey: ["_field"], \
+                                 valueColumn: "_value") \
+                        |> sort(columns:[\"_time\"], desc: true)'
+                            
+            #print(qry)
+                            
+            res = self.gc.influx_query_api.query_data_frame(qry)
+            
+            res = res.set_index('_time')
+            res = res.drop(columns=['result', 'table'])
+            
+            with pd.option_context('display.max_rows', None, 'display.max_columns', None): 
+                #print(res)
+                pass
         
         self.assertEqual(3975, res.iloc[0]['Invested-total'], "Total investment in depot Dep_01")
         self.assertEqual(4000, res.iloc[0]['Value-total'], "Total value in depot Dep_01")
@@ -122,7 +157,9 @@ class TestGC(unittest.TestCase):
 
     def test_steps(self):
         
+        
         self.gc = glob.GlobalContainer("config-test.cfg", "TestRun")
+        self.gc.logger.info("####################### STARTING #######################")
         
         for name, num, step in self._steps():
             try:
@@ -131,13 +168,14 @@ class TestGC(unittest.TestCase):
             except Exception as e:
 
                 self.fail("{} failed ({}: {})".format(step, type(e), e))
-            finally:
-                print("####################### Disposing Engine #######################")
-                self.gc.ses.commit()
-                self.gc.ses.close()
-                self.gc.eng.dispose()
                 
 
+        print("####################### Disposing Engine #######################")
+        self.gc.ses.commit()
+        self.gc.ses.close()
+        self.gc.eng.dispose()
+        
+        self.gc.logger.info("####################### END #######################")
 
 
 if __name__ == '__main__':
