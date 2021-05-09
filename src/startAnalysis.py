@@ -49,11 +49,11 @@ try:
         
     # Build Portfolio
     
-    df_trans = pd.read_excel(f"{gc.data_root}Transactions.ods", engine = "odf")
+    df_trans = pd.read_excel(os.path.join(gc.data_root, "Transactions.ods"), engine = "odf")
     df_trans['ISIN'] = df_trans['ISIN'].str.strip()
     df_trans['Depot'] = df_trans['Depot'].str.strip()
     
-    df_distri = pd.read_excel(f"{gc.data_root}TargetDistribution.ods", engine = "odf")
+    df_distri = pd.read_excel(os.path.join(gc.data_root, "TargetDistribution.ods"), engine = "odf")
     df_distri['ISIN'] = df_distri['ISIN'].str.strip()
     df_distri['Depot'] = df_distri['Depot'].str.strip()
 
@@ -64,7 +64,7 @@ try:
     
     for myDepot in df_trans['Depot'].unique():
         df_full = engines.analysis.buildDepot(gc, df_trans, df_distri, myDepot)
-        df_full.to_excel(f"{gc.data_root}Depot-{myDepot}.ods", engine = "odf")
+        # df_full.to_excel(os.path.join(gc.data_root, f"Depot-{myDepot}.ods"), engine = "odf")
     
     #df = df_full[(df_full.index > "2018-12-20") & (df_full.index < "2018-12-28")]
     
@@ -73,41 +73,47 @@ try:
         #print(df)
     
     
+    #KPI-Berechnungen
+    
+    
+    #Korrelationsmatrix pro Depot
+    
+    
     #sys.exit()
     
     
     # Process Notes
     #
-    engines.scaffold.loadNotes(gc, "../data/Notizen.ods")
+    #engines.scaffold.loadNotes(gc, "../data/Notizen.ods")
 
     
     # Correlation Matrix
     #
     #
-    dfs = []
+    # dfs = []
     
-    for s in gc.ses.query(Stock).all():
-        df = gc.influxClient.query(f'select close from StockValues where "ISIN" = \'{s.ISIN}\'')['StockValues']
-        #print(df)
-        logger.info(f'Stock {s.NameShort} has {len(df.index)} Rows')
-        r = [s, df]
-        dfs.append(r)
+    # for s in gc.ses.query(Stock).all():
+    #     df = gc.influxClient.query(f'select close from StockValues where "ISIN" = \'{s.ISIN}\'')['StockValues']
+    #     #print(df)
+    #     logger.info(f'Stock {s.NameShort} has {len(df.index)} Rows')
+    #     r = [s, df]
+    #     dfs.append(r)
     
     
-    df_full = dfs[0][1]
+    # df_full = dfs[0][1]
     
-    #df_full = df_full.join(dfs[1][1], how="outer", rsuffix = "bl")
+    # #df_full = df_full.join(dfs[1][1], how="outer", rsuffix = "bl")
     
-    for d in dfs:
-        nc = f'-{d[0].ISIN}'
-        d[1].rename(columns={"close": nc})
-        df_full = df_full.join(d[1], how="outer", rsuffix = nc)
+    # for d in dfs:
+    #     nc = f'-{d[0].ISIN}'
+    #     d[1].rename(columns={"close": nc})
+    #     df_full = df_full.join(d[1], how="outer", rsuffix = nc)
     
-    #print(df_full)
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None): 
-        df_corr =df_full.corr()
-        # print(df_corr)
-        #print(df_corr.stack().reset_index().sort_values(0, ascending=False))
+    # #print(df_full)
+    # with pd.option_context('display.max_rows', None, 'display.max_columns', None): 
+    #     df_corr =df_full.corr()
+    #     # print(df_corr)
+    #     #print(df_corr.stack().reset_index().sort_values(0, ascending=False))
     
     
     
@@ -128,3 +134,5 @@ try:
     
 except Exception as e:
     logger.exception('Crash!', exc_info=e)
+    gc.writeJobStatus("CRASH", EndDate=datetime.datetime.now(), statusMessage=gc.errMsg)
+    

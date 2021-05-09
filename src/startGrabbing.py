@@ -18,14 +18,13 @@ from dataobjects.stock import Stock
 
 
 ap = argparse.ArgumentParser()
-ap.add_argument("-c", "--config", required=False, help="path to config file")
+ap.add_argument("-c", "--config", required=False, help="path to config file", default='config.cfg')
+ap.add_argument("-ri", "--resetInflux", required=False, help="reset influx db", default='n')
+ap.add_argument("-rm", "--resetMySQL", required=False, help="reset mysql db", default='n')
 
 args = vars(ap.parse_args())
 
 configFile = args["config"]
-if (configFile == None):
-    configFile = "config.cfg"
-
 gc = glob.GlobalContainer(configFile, "LoadStocks")
 logger = logging.getLogger(__name__)
 
@@ -41,18 +40,17 @@ try:
     logger.info(f'Config-File:       {configFile}')
     logger.info(f'Logfile:           {gc.log_path}')
     logger.info(f"Loglevel:          {l}")
+    logger.info(f"Arguments:         {args}")
     logger.setLevel(l)
     
-    #gc.resetMySQLDatabases()
-    #gc.resetInfluxDatabases()
-
-    # s = Stock("IE00B6897102")
-    # engines.scaffold.enrichStock(gc, s)
-    # sys.exit()
-    
-    
+    if (args['resetMySQL'].lower() == 'y'):
+        gc.resetMySQLDatabases()
+        
+    if (args['resetInflux'].lower() == 'y'):
+        gc.resetInfluxDatabases()
+   
     # Fill base-Table with ISINS
-    engines.scaffold.loadStocks(gc, "../data/ISINS.csv")
+    engines.scaffold.loadStocks(gc, os.path.join(gc.data_root, "ISINS.csv"))
     
     # Get Metadata for Stocks
     for s in gc.ses.query(Stock).all():
@@ -66,7 +64,7 @@ try:
     
     
     # Fill/Update Notes Table
-    engines.scaffold.loadNotes(gc, "../data/Notizen.ods")
+    #engines.scaffold.loadNotes(gc, os.path.join(gc.data_root, "Notizen.ods"))
     
     
     if (gc.numErrors == 0):
@@ -85,3 +83,5 @@ try:
     
 except Exception as e:
     logger.exception('Crash!', exc_info=e)
+    gc.writeJobStatus("CRASH", EndDate=datetime.datetime.now(), statusMessage=gc.errMsg)
+    

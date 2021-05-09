@@ -202,27 +202,27 @@ def enrichComId(gc, stock, soup, url, mkPlace):
                 return 1
             else:
                 return 0
-
-                
         
         logger.warn(f"No Marketplace found for {stock.ISIN}")
         
         # Check if there is no marketselect at all, example IE00B6897102
         # Check for a specific location if there is the ISIN correctly located
-        res = soup.select_one("span.key-focus__identifier-type:nth-child(2)").next_sibling
-        if res is not None:
-            res = res.strip()
-            if (res == stock.ISIN):
-                # we take the redirect and extract the ID_NOTATION
-
-                p = parse.parse_qs(parse.urlsplit(url).query)
-                stock.ComdirectId = p['ID_NOTATION'][0]
-                stock.Marketplace = "default"
-                logger.debug(f'Getting ComId {stock.ComdirectId} for place {stock.Marketplace} for ISIN {stock.ISIN}')
-                
-                gc.ses.add(stock)
-                gc.ses.commit()
-                return 1
+        res1 = soup.select_one("span.key-focus__identifier-type:nth-child(2)")
+        if (res1 is not None):
+            res = res1.next_sibling
+            if res is not None:
+                res = res.strip()
+                if (res == stock.ISIN):
+                    # we take the redirect and extract the ID_NOTATION
+    
+                    p = parse.parse_qs(parse.urlsplit(url).query)
+                    stock.ComdirectId = p['ID_NOTATION'][0]
+                    stock.Marketplace = "default"
+                    logger.debug(f'Getting ComId {stock.ComdirectId} for place {stock.Marketplace} for ISIN {stock.ISIN}')
+                    
+                    gc.ses.add(stock)
+                    gc.ses.commit()
+                    return 1
     
     except Exception as e:
         logger.exception('Crash!', exc_info=e)
@@ -236,6 +236,15 @@ def enrichStock(gc, stock):
     
     try:
         gc.writeJobStatus("Running", statusMessage=f'Enriching stock {stock.ISIN}')
+        
+        if (stock.ISIN.lower() == "cash"):
+            stock.Name = "Cash in EURO"
+            stock.Type = "Cash"
+            stock.NameShort = "Cash"
+            stock.ComdirectId = -1
+            gc.ses.add(stock)
+            gc.ses.commit()
+            return
         
         page = requests.get(f'https://www.comdirect.de/inf/search/all.html?SEARCH_VALUE={stock.ISIN}')
         if (page.status_code != 200):

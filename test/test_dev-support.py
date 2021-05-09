@@ -21,6 +21,8 @@ import logging
 import random
 from pytz import UTC
 
+import os
+
 from influxdb_client import InfluxDBClient, WriteOptions
 
 
@@ -38,8 +40,11 @@ class TestGC(unittest.TestCase):
         #engines.scaffold.getFondDistributions(self.gc, s)
         
         try:
+            ts = datetime.datetime.strptime('2018-07-09 00:00:00', '%Y-%m-%d %H:%M:%S')
+            engines.analysis.loadStock(self.gc, 'LU1681045370', ts)
+            sys.exit()
             
-            https://github.com/influxdata/influxdb-client-python#queries
+            # https://github.com/influxdata/influxdb-client-python#queries
             
             print (self.gc.influxClient)
             
@@ -82,7 +87,20 @@ class TestGC(unittest.TestCase):
             self.logger.exception('Crash!', exc_info=e)
             sys.exit(99)
 
-
+    def step002(self):
+        """
+        Text XIRR
+        """
+        pass
+        df_trans = pd.read_excel(os.path.join(self.gc.data_root, "Transactions-XIRR.ods"), engine = "odf")
+        df_trans['ISIN'] = df_trans['ISIN'].str.strip()
+        df_trans['Depot'] = df_trans['Depot'].str.strip()
+    
+        df_distri = pd.read_excel(os.path.join(self.gc.data_root, "TargetDistribution.ods"), engine = "odf")
+        df_distri['ISIN'] = df_distri['ISIN'].str.strip()
+        df_distri['Depot'] = df_distri['Depot'].str.strip()
+        
+        df_full = engines.analysis.buildDepot(self.gc, df_trans, df_distri, "XIRR")
 
         
     def step999(self):
@@ -105,7 +123,7 @@ class TestGC(unittest.TestCase):
         
         try:
             for name, num, step in self._steps():
-                if(num > -3):
+                if(num > 1):
                     step()
                     
         except Exception as e:

@@ -55,7 +55,7 @@ def grabStock(gc, stock):
         logger.info(f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
         gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
         
-        startDate = "01.01.1900"
+        startDate = "01.01.1950"
         endDate = datetime.datetime.now().strftime("%d.%m.%Y")
         
         if (gc.influx_version == 1):
@@ -85,6 +85,14 @@ def grabStock(gc, stock):
         
         logger.debug(f'StartDate: {startDate}, EndDate: {endDate}')
         
+        if (stock.ISIN.lower() == "cash"):
+                rng = pd.bdate_range(startDate, datetime.datetime.now())
+                df = pd.DataFrame({'close': 1.0, 'high': 1.0, 'low': 1.0, 'open': 1.0, 'volume': 1.0 }, index = rng) 
+                df.index = df.index.tz_localize('utc')
+                saveStock(gc, df, stock)
+                
+        # Loading values from comdirect
+        
         # url = "https://www.comdirect.de/inf/kursdaten/historic.csv?DATETIME_TZ_END_RANGE_FORMATED=13.03.2021&DATETIME_TZ_START_RANGE_FORMATED=23.11.2011&ID_NOTATION=55081566&INTERVALL=16&WITH_EARNINGS=true"
         df = pd.DataFrame()
         
@@ -93,7 +101,7 @@ def grabStock(gc, stock):
             for offset in range(0, 999):
                 logger.debug(f'Offset: {offset}')
                 url = f'https://www.comdirect.de/inf/kursdaten/historic.csv?DATETIME_TZ_END_RANGE_FORMATED={endDate}&DATETIME_TZ_START_RANGE_FORMATED={startDate}&ID_NOTATION={stock.ComdirectId}&INTERVALL=16&OFFSET={offset}&WITH_EARNINGS=false'
-                df1 = pd.read_csv(url, encoding='ANSI', sep=';', skiprows=1)
+                df1 = pd.read_csv(url, encoding='cp1252', sep=';', skiprows=1)
                 logger.debug(f'Rows loaded: {len(df1.index)}')
                 df = df.append(df1)
                 
@@ -296,12 +304,12 @@ def saveStock(gc, df, s):
             df['Name'] = s.NameShort
             
             x = 0
-            step = 200
+            step = 500
             for df_chunk in gc.chunk(df, step):
                 logger.debug(f"Saving {x} of {len(df.index)}...")
                 x += step
                 gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df_chunk, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN', 'Name'])
- 
+                gc.influx_write_api.close()
     
     
         gc.writeJobStatus("Running", statusMessage=msg + " - DONE")

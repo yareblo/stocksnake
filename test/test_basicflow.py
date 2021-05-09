@@ -27,6 +27,7 @@ class TestGC(unittest.TestCase):
         Test general GlobalContainer-Functions
         """
         
+        self.gc.logger.info("####################### Step 01: Initialize #######################")
         self.gc.resetMySQLDatabases()
         self.gc.resetInfluxDatabases()
         
@@ -44,6 +45,7 @@ class TestGC(unittest.TestCase):
         
     def step002(self):
         """Stock Enrichment"""
+        self.gc.logger.info("####################### Step 02: Stock Enrichment #######################")
         
         # Aktie Volkswagen
         s = Stock("DE0007664039")
@@ -73,8 +75,21 @@ class TestGC(unittest.TestCase):
         self.assertEqual("29495143", s.ComdirectId)
         self.assertEqual("ETF", s.StockType)
         
+        
+        # Non-Existing Stock
+        s = Stock("DE000A141DW0")
+        engines.scaffold.enrichStock(self.gc, s)
+        
+        self.assertEqual(None, s.WKN)
+        self.assertEqual(None, s.ComdirectId)
+        self.assertEqual(None, s.StockType)
+        
+        
+        
     def step003(self):
         """Stock Grabbing"""
+        self.gc.logger.info("####################### Step 03: Stock Grabbing #######################")
+        
         engines.grabstocks.createTestStocks(self.gc)
         
         for s in self.gc.ses.query(Stock).all():
@@ -87,7 +102,7 @@ class TestGC(unittest.TestCase):
                 l = len(df_stock.index)
             else:
                 qry = f'from(bucket: \"{self.gc.influx_db}\") \
-                        |> range(start: 0)  \
+                        |> range(start: 1900-01-01T00:00:00.000000000Z)  \
                         |> filter(fn: (r) => \
                             r.ISIN == \"{s.ISIN}\" and r._field == \"close\")'
                 df_stock = self.gc.influx_query_api.query_data_frame(qry)
@@ -98,6 +113,8 @@ class TestGC(unittest.TestCase):
 
     def step004(self):
         """Depot Building"""
+        self.gc.logger.info("####################### Step 04: Depot Building #######################")
+        
         df_trans = pd.read_excel(f"{self.gc.data_root}Transactions.ods", engine = "odf")
         df_trans['ISIN'] = df_trans['ISIN'].str.strip()
         df_trans['Depot'] = df_trans['Depot'].str.strip()
@@ -163,7 +180,7 @@ class TestGC(unittest.TestCase):
         
         for name, num, step in self._steps():
             try:
-                if(num > -3):
+                if(num > -1):
                     step()
             except Exception as e:
 

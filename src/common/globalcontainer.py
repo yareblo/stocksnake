@@ -185,6 +185,9 @@ class GlobalContainer(object):
             
             self.data_root = configParser.get('Data', 'DataRoot', fallback = self.data_root)
             
+            
+            
+            
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
     
@@ -225,16 +228,16 @@ class GlobalContainer(object):
                 retries = WritesRetry(total=20, backoff_factor=1, exponential_base=1)
                 
                 self.influxClient = InfluxDBClient(url=f"http://{self.influx_host}:{self.influx_port}", 
-                                                   token=self.influx_token, org=self.influx_org, retries=retries)
+                                                   token=self.influx_token, org=self.influx_org, retries=retries, timeout=180_000)
                 
                 self.influx_query_api = self.influxClient.query_api()
             
                 self.influx_write_api = self.influxClient.write_api(write_options=WriteOptions(batch_size=500, write_type=WriteType.synchronous,
                                                           flush_interval=10_000,
                                                           jitter_interval=2_000,
-                                                          retry_interval=5_000,
-                                                          max_retries=5,
-                                                          max_retry_delay=30_000,
+                                                          retry_interval=30_000,
+                                                          max_retries=25,
+                                                          max_retry_delay=60_000,
                                                           exponential_base=2)) 
                 #self.influx_write_api = self.influxClient.write_api(write_options=SYNCHRONOUS)
                 
@@ -275,19 +278,22 @@ class GlobalContainer(object):
             else:
                 buckets_api = self.influxClient.buckets_api()
                 
-                buckets = buckets_api.find_buckets().buckets
-                my_bucket = None
-                for b in buckets:
-                    if (b.name == self.influx_db):
-                        my_bucket = b
+                my_bucket = buckets_api.find_bucket_by_name(self.influx_db)
+                
+                # f_buckets = buckets_api.find_buckets()
+                # buckets = buckets_api.find_buckets().buckets
+                # my_bucket = None
+                # for b in buckets:
+                #     if (b.name == self.influx_db):
+                #         my_bucket = b
                 
                 if (my_bucket is not None):
                     buckets_api.delete_bucket(my_bucket)
                 
                 org_name = self.influx_org
                 org = list(filter(lambda it: it.name == org_name, self.influxClient.organizations_api().find_organizations()))[0]
-                #retention_rules = BucketRetentionRules(type="expire", every_seconds=3600)
-                created_bucket = buckets_api.create_bucket(bucket_name = self.influx_db,  org_id = org.id)
+                retention_rules = BucketRetentionRules(type="forever", every_seconds=0)  #3600*24*365*200
+                created_bucket = buckets_api.create_bucket(bucket_name = self.influx_db, retention_rules=retention_rules, org_id = org.id)
             
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
