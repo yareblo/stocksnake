@@ -296,7 +296,7 @@ def calcXIRR(gc, df_full, myDepot, days):
         l_xirr[df.index[-1]] = -df.iloc[-1]['Value-total']
         
         # calculate
-        print(l_xirr)
+        #print(l_xirr)
         x = xirr.xirr(l_xirr)
         
         logger.debug(f"XIRR of depot {myDepot}: {x}")
@@ -305,9 +305,10 @@ def calcXIRR(gc, df_full, myDepot, days):
         now=pd.Timestamp(datetime.datetime.now(UTC)).replace(hour=0, minute=0, second=0, microsecond=0)
         
         df_res = pd.DataFrame(index=[now], columns=["KPI-Value", "KPI", "Depot"], data=[[x, f"XIRR-{days}", myDepot]])
-        print(df_res)
-        gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df_res, data_frame_measurement_name="KPIs", data_frame_tag_columns=['Depot', 'KPI'])
-        gc.influx_write_api.close()
+        #print(df_res)
+        if ((x != float("inf")) and (x != float("-inf"))):
+            gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df_res, data_frame_measurement_name="KPIs", data_frame_tag_columns=['Depot', 'KPI'])
+            gc.influx_write_api.close()
     
         gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
         logger.debug(msg + " - DONE")

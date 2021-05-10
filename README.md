@@ -61,3 +61,41 @@ pip install <some-package>
 ### Deactivate:
 deactivate
 
+
+## Troubleshooting InfluxDB
+
+### Watch Logfile:
+
+tail -n30 /var/log/syslog | grep influx
+
+
+### Too many open files
+
+Modify /etc/security/limits.conf add the following:
+
+*               soft    nofile            300000
+*               hard    nofile            300000
+root            soft    nofile            300000
+root            hard    nofile            300000
+
+### Check Cardinality
+
+// Count unique values for each tag in a bucket
+import "influxdata/influxdb/schema"
+
+cardinalityByTag = (bucket) =>
+  schema.tagKeys(bucket: bucket)
+    |> map(fn: (r) => ({
+      tag: r._value,
+      _value:
+        if contains(set: ["_stop","_start"], value:r._value) then 0
+        else (schema.tagValues(bucket: bucket, tag: r._value)
+          |> count()
+          |> findRecord(fn: (key) => true, idx: 0))._value
+    }))
+    |> group(columns:["tag"])
+    |> sum()
+
+cardinalityByTag(bucket: "stocks-dev")
+
+

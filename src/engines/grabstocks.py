@@ -14,6 +14,8 @@ import sys
 import datetime
 from dataobjects.stock import Stock
 import random
+from influxdb_client import InfluxDBClient, WriteOptions
+from influxdb_client.client.write_api import SYNCHRONOUS, WriteType
 
 
 def getFirstDate(gc, isin):
@@ -55,7 +57,7 @@ def grabStock(gc, stock):
         logger.info(f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
         gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
         
-        startDate = "01.01.1950"
+        startDate = "01.01.1970"
         endDate = datetime.datetime.now().strftime("%d.%m.%Y")
         
         if (gc.influx_version == 1):
@@ -298,18 +300,26 @@ def saveStock(gc, df, s):
         gc.writeJobStatus("Running", statusMessage=msg)
         
         if (gc.influx_version == 1):
-            gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN, 'Name': s.NameShort}, protocol='line')
+            gc.influxClient.write_points(df, "StockValues", {'ISIN': s.ISIN}, protocol='line')
         else:
             df['ISIN'] = s.ISIN
-            df['Name'] = s.NameShort
             
             x = 0
             step = 500
             for df_chunk in gc.chunk(df, step):
                 logger.debug(f"Saving {x} of {len(df.index)}...")
                 x += step
-                gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df_chunk, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN', 'Name'])
-                gc.influx_write_api.close()
+                
+                influx_write_api = gc.influxClient.write_api(write_options=WriteOptions(batch_size=500, write_type=WriteType.synchronous,
+                                                          flush_interval=10_000,
+                                                          jitter_interval=2_000,
+                                                          retry_interval=30_000,
+                                                          max_retries=25,
+                                                          max_retry_delay=60_000,
+                                                          exponential_base=2)) 
+                
+                influx_write_api.write(gc.influx_db, gc.influx_org, record=df_chunk, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN'])
+                influx_write_api.close()
     
     
         gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
