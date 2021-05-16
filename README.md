@@ -61,6 +61,9 @@ pip install <some-package>
 ### Deactivate:
 deactivate
 
+### Run script manually
+python src/startGrabbing.py -ri n -rm n
+
 
 ## Troubleshooting InfluxDB
 

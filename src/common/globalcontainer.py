@@ -62,6 +62,7 @@ class GlobalContainer(object):
     log_path = None
     
     jobName = "unknown"
+    runId = "None"
     
     numErrors = 0
     errMsg = ""
@@ -79,6 +80,7 @@ class GlobalContainer(object):
             log_screen = True
             self.jobName = job
             self.resolver = Resolver(self)
+            self.runId = f"{job}-{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M%S')}"
             
             self.readConfig(configPath)
             self.writeConfig(configPath)
@@ -276,24 +278,21 @@ class GlobalContainer(object):
                 self.influxClient.drop_database(self.influx_db)
                 self.influxClient.create_database(self.influx_db)
             else:
-                buckets_api = self.influxClient.buckets_api()
                 
-                my_bucket = buckets_api.find_bucket_by_name(self.influx_db)
+                with InfluxDBClient(url=f"http://{self.influx_host}:{self.influx_port}", 
+                                                   token=self.influx_token, org=self.influx_org, timeout=180_000) as client:
                 
-                # f_buckets = buckets_api.find_buckets()
-                # buckets = buckets_api.find_buckets().buckets
-                # my_bucket = None
-                # for b in buckets:
-                #     if (b.name == self.influx_db):
-                #         my_bucket = b
+                    buckets_api = client.buckets_api()
                 
-                if (my_bucket is not None):
-                    buckets_api.delete_bucket(my_bucket)
+                    my_bucket = buckets_api.find_bucket_by_name(self.influx_db)
                 
-                org_name = self.influx_org
-                org = list(filter(lambda it: it.name == org_name, self.influxClient.organizations_api().find_organizations()))[0]
-                retention_rules = BucketRetentionRules(type="forever", every_seconds=0)  #3600*24*365*200
-                created_bucket = buckets_api.create_bucket(bucket_name = self.influx_db, retention_rules=retention_rules, org_id = org.id)
+                    if (my_bucket is not None):
+                        buckets_api.delete_bucket(my_bucket)
+                    
+                    org_name = self.influx_org
+                    org = list(filter(lambda it: it.name == org_name, self.influxClient.organizations_api().find_organizations()))[0]
+                    retention_rules = BucketRetentionRules(type="forever", every_seconds=0)  #3600*24*365*200
+                    created_bucket = buckets_api.create_bucket(bucket_name = self.influx_db, retention_rules=retention_rules, org_id = org.id)
             
         except Exception as e:
             self.logger.exception('Crash!', exc_info=e)
@@ -344,4 +343,47 @@ class GlobalContainer(object):
             
     def chunk(self, seq, size):
         return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
+    
+    def writeJobMessage(self, logType, logObject, logObjectId, message):
+        try:
+            jobMessage = (self.runId, logType, logObject, logObjectId, message)
+            
+            self.ses.add(jobMessage)
+            self.ses.commit()
+            
+        except Exception as e:
+            self.logger.exception('Crash!', exc_info=e)
+            
+            
+            
+            
+            
+    def iQuery(self, qry):
+        """Executes the flow query against the innodb"""
+    
+        loc = locals()
+        logger = logging.getLogger(__name__)
+        res = None
+        
+        try:
+            msg = f"Starting iQuery with {loc}"
+            logger.debug(msg)
+            self.writeJobStatus("Running", statusMessage=msg)
+            
+            with InfluxDBClient(url=f"http://{self.influx_host}:{self.influx_port}", 
+                                                   token=self.influx_token, org=self.influx_org, timeout=180_000) as client:
+                res = client.query_api().query_data_frame(qry)
+
+            self.writeJobStatus("Running", statusMessage=msg + " - DONE")
+            logger.debug(msg + " - DONE")
+            
+            return res
+            
+        except Exception as e:
+            logger.exception(f'Crash iQuery with {loc}!', exc_info=e)
+            self.numErrors += 1
+            self.errMsg += f"Crash iQuery with {loc}; "
+                
+            
             

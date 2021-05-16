@@ -239,7 +239,8 @@ def enrichStock(gc, stock):
         
         if (stock.ISIN.lower() == "cash"):
             stock.Name = "Cash in EURO"
-            stock.Type = "Cash"
+            stock.StockType = "Cash"
+            stock.WKN = "Cash"
             stock.NameShort = "Cash"
             stock.ComdirectId = -1
             gc.ses.add(stock)

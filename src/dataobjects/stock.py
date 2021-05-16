@@ -31,6 +31,17 @@ class Stock(Base):
     
     ComdirectId = Column(String(256))
     
+    
+    # Info
+    
+    
+    
+    # Data Quality
+    LastValueDate = Column(DateTime)
+    FirstValueDate = Column(DateTime)
+    MaxGap = Column(Integer)
+    GapInfo = Column(String(1024))
+    
     def __init__(self, ISIN):
         self.ISIN = ISIN
 

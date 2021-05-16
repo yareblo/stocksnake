@@ -16,28 +16,55 @@ from dataobjects.stock import Stock
 import random
 from influxdb_client import InfluxDBClient, WriteOptions
 from influxdb_client.client.write_api import SYNCHRONOUS, WriteType
+import holidays
+
+import engines.analysis
 
 
 def getFirstDate(gc, isin):
     
-    qry = f'select time, close from StockValues where ISIN = \'{isin}\' order by time asc limit 1'
-    res = gc.influxClient.query(qry)
+    qry = f'from(bucket: \"{gc.influx_db}\") \
+                |> range(start: 0)  \
+                |> filter(fn: (r) => \
+                    r.ISIN == \"{isin}\" and r._field == \"close\")   \
+                |> sort(columns: ["_time"], desc: false) \
+                |> first()'
+                
+    with InfluxDBClient(url=f"http://{gc.influx_host}:{gc.influx_port}", 
+                                                   token=gc.influx_token, org=gc.influx_org, timeout=180_000) as client:
+        res = client.query_api().query_data_frame(qry)
+    # print("----------------------")
+    # print(res)
+    # print("----------------------")
     
     if len(res) > 0:
-        return res['StockValues'].index[0]
+        print (type (res.loc[0]['_time']))
+        return res.loc[0]['_time'].to_pydatetime()
     
-    msg = f"No first date found for {isin}"
+    msg = f"No last date found for {isin}"
     gc.numWarnings += 1
     gc.warnMsg += msg + "; "
+    
     return None
 
 def getLastDate(gc, isin):
     
-    qry = f'select time, close from StockValues where ISIN = \'{isin}\' order by time desc limit 1'
-    res = gc.influxClient.query(qry)
-    
+    qry = f'from(bucket: \"{gc.influx_db}\") \
+                |> range(start: 0)  \
+                |> filter(fn: (r) => \
+                    r.ISIN == \"{isin}\" and r._field == \"close\")   \
+                |> sort(columns: ["_time"], desc: true) \
+                |> first()'
+                
+    with InfluxDBClient(url=f"http://{gc.influx_host}:{gc.influx_port}", 
+                                                   token=gc.influx_token, org=gc.influx_org, timeout=180_000) as client:
+        res = client.query_api().query_data_frame(qry)
+
+    # print("----------------------")
+    # print(res)
+    # print("----------------------")
     if len(res) > 0:
-        return res['StockValues'].index[0]
+        return res.loc[0]['_time'].to_pydatetime()
     
     msg = f"No last date found for {isin}"
     gc.numWarnings += 1
@@ -54,10 +81,10 @@ def grabStock(gc, stock):
     
     try:
        
-        logger.info(f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
+        logger.info(f'Grabbing Stock {stock.NameShort}, ISIN: {stock.ISIN}')
         gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN}')
         
-        startDate = "01.01.1970"
+        startDate = "01.01.1990"
         endDate = datetime.datetime.now().strftime("%d.%m.%Y")
         
         if (gc.influx_version == 1):
@@ -77,7 +104,15 @@ def grabStock(gc, stock):
                             r.ISIN == \"{stock.ISIN}\" and r._field == \"close\")   \
                         |> sort(columns: ["_time"], desc: true) \
                         |> first()'
-            res = gc.influx_query_api.query_data_frame(qry)
+                        
+            with InfluxDBClient(url=f"http://{gc.influx_host}:{gc.influx_port}", 
+                                                   token=gc.influx_token, org=gc.influx_org, timeout=180_000) as client:
+                    res = client.query_api().query_data_frame(qry)
+                                
+            
+            #print("----------------------")
+            #print(res)
+            #print("----------------------")
             
             if len(res) > 0:
                 ts = res.loc[0]['_time']
@@ -88,10 +123,17 @@ def grabStock(gc, stock):
         logger.debug(f'StartDate: {startDate}, EndDate: {endDate}')
         
         if (stock.ISIN.lower() == "cash"):
-                rng = pd.bdate_range(startDate, datetime.datetime.now())
-                df = pd.DataFrame({'close': 1.0, 'high': 1.0, 'low': 1.0, 'open': 1.0, 'volume': 1.0 }, index = rng) 
-                df.index = df.index.tz_localize('utc')
-                saveStock(gc, df, stock)
+            logger.debug("Creating cash")
+            sDate = datetime.datetime.strptime(startDate, "%d.%m.%Y")
+            eDate = datetime.datetime.strptime(endDate, "%d.%m.%Y") - datetime.timedelta(days=1) # Bis zum Vortag, da alle Aktienwerte auch vom Vortag sind
+            rng = pd.bdate_range(sDate, eDate, freq="B")
+            logger.debug(f"Creating cash for range {rng} from {sDate} to {eDate}")
+            df = pd.DataFrame({'close': 1.0, 'high': 1.0, 'low': 1.0, 'open': 1.0, 'volume': 1.0 }, index = rng) 
+            df.index = df.index.tz_localize('utc')
+            logger.debug(f"Creating cash for dataframe {df}")
+            saveStock(gc, df, stock)
+            gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN} - DONE')
+            return
                 
         # Loading values from comdirect
         
@@ -114,7 +156,7 @@ def grabStock(gc, stock):
                 logger.exception('Crash!', exc_info=e)
 
         if (len(df.index) == 0):
-            msg = f"No Prices found for Stock {stock.NameShort}, ISIN: {stock.ISIN}"
+            msg = f"No Prices found on Comdirect for Stock {stock.NameShort}, ISIN: {stock.ISIN}"
             logger.error(msg)
             gc.errMsg += (msg + "; ")
             gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN} - ERROR')
@@ -150,6 +192,8 @@ def grabStock(gc, stock):
         #     df['ISIN'] = stock.ISIN
         #     df['Name'] = stock.Name
         #     gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN', 'Name'])
+        
+        checkQuality(gc, stock)
         
         gc.writeJobStatus("Running", statusMessage=f'Loading Stock {stock.NameShort}, ISIN: {stock.ISIN} - DONE')
     
@@ -310,16 +354,20 @@ def saveStock(gc, df, s):
                 logger.debug(f"Saving {x} of {len(df.index)}...")
                 x += step
                 
-                influx_write_api = gc.influxClient.write_api(write_options=WriteOptions(batch_size=500, write_type=WriteType.synchronous,
-                                                          flush_interval=10_000,
-                                                          jitter_interval=2_000,
-                                                          retry_interval=30_000,
-                                                          max_retries=25,
-                                                          max_retry_delay=60_000,
-                                                          exponential_base=2)) 
+                with InfluxDBClient(url=f"http://{gc.influx_host}:{gc.influx_port}", 
+                                                   token=gc.influx_token, org=gc.influx_org, timeout=180_000) as client:
                 
-                influx_write_api.write(gc.influx_db, gc.influx_org, record=df_chunk, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN'])
-                influx_write_api.close()
+                # influx_write_api = gc.influxClient.write_api(write_options=WriteOptions(write_type=WriteType.synchronous,
+                #                                           flush_interval=10_000,
+                #                                           jitter_interval=2_000,
+                #                                           retry_interval=30_000,
+                #                                           max_retries=25,
+                #                                           max_retry_delay=60_000,
+                #                                           exponential_base=2)) 
+                
+                    with client.write_api(write_options=SYNCHRONOUS) as write_api:
+                        write_api.write(gc.influx_db, gc.influx_org, record=df_chunk, data_frame_measurement_name="StockValues", data_frame_tag_columns=['ISIN'])
+                        write_api.close()
     
     
         gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
@@ -330,4 +378,37 @@ def saveStock(gc, df, s):
         gc.errMsg += f"Crash saveStock with {loc}; "
         
         
+def checkQuality(gc, stock):
+    """Checks sime aspects of the data quality of the stock"""
+    
+    loc = locals()
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = f"Starting checkQuality with {loc}"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+        stock.FirstValueDate = getFirstDate(gc, stock.ISIN)
+        stock.LastValueDate = getLastDate(gc, stock.ISIN)
 
+        # Get Gaps        
+        # ge_holidays = holidays.Germany()
+        # df = engines.analysis.loadStock(gc, stock.ISIN, pd.Timestamp('1900-01-01 00:00:00', tz=None))
+        
+        # db_index = pd.bdate_range(start=stock.FirstValueDate, end=stock.LastValueDate, normalize=True, holidays=ge_holidays)
+        # df_td = pd.DataFrame(index=db_index) auf einen schlag
+        # df_td['TD'] = 1
+        # print(df_td)
+        # sys.exit()
+        
+        gc.ses.add(stock)
+        gc.ses.commit()
+    
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+    except Exception as e:
+        logger.exception(f'Crash checkQuality with {loc}!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += f"Crash checkQuality with {loc}; "
+        #sys.exit()

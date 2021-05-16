@@ -102,6 +102,36 @@ class TestGC(unittest.TestCase):
         
         df_full = engines.analysis.buildDepot(self.gc, df_trans, df_distri, "XIRR")
 
+    def step003(self):
+        """
+        Test data quality
+        """
+        pass
+        #self.gc.resetMySQLDatabases()
+        #self.gc.resetInfluxDatabases()
+        #s = Stock("DE000ETFL284")
+        s = self.gc.ses.query(Stock).filter(Stock.ISIN == "LU0360863863").first()
+        if (s is None):
+            s = Stock("LU0360863863")
+            engines.scaffold.enrichStock(self.gc, s)
+
+        engines.grabstocks.grabStock(self.gc, s)
+        
+        engines.grabstocks.checkQuality(self.gc, s)
+    
+    
+    def step004(self):
+        """
+        Test CASH
+        """
+        pass        
+        s = self.gc.ses.query(Stock).filter(Stock.ISIN == "CASH").first()
+        if (s is None):
+            s = Stock("CASH")
+            engines.scaffold.enrichStock(self.gc, s)
+
+        engines.grabstocks.grabStock(self.gc, s)
+    
         
     def step999(self):
         
@@ -110,6 +140,38 @@ class TestGC(unittest.TestCase):
         self.gc.eng.dispose()
         
         
+    def step005(self):
+        """
+        Test Satellit
+        """
+        pass   
+        df_trans = pd.read_excel(os.path.join(self.gc.data_root, "Transactions.ods"), engine = "odf")
+        df_trans['ISIN'] = df_trans['ISIN'].str.strip()
+        df_trans['Depot'] = df_trans['Depot'].str.strip()
+        
+        df_distri = pd.read_excel(os.path.join(self.gc.data_root, "TargetDistribution.ods"), engine = "odf")
+        df_distri['ISIN'] = df_distri['ISIN'].str.strip()
+        df_distri['Depot'] = df_distri['Depot'].str.strip()
+    
+        #print(df_distri)
+        
+        #buildDepotStock(df_trans, df_distri, "Einzelwerte", "DE000UNSE018")
+        #sys.exit()
+        myDepot="Satellit"
+        df_full = engines.analysis.buildDepot(self.gc, df_trans, df_distri, myDepot)
+        df_full.to_excel(os.path.join(self.gc.data_root, f"Depot-{myDepot}.ods"), engine = "odf")
+        
+        
+    def step006(self):
+        """
+        Test Satellit
+        """
+        pass 
+        engines.analysis.calcABeckKPI(self.gc)
+    
+    
+    
+    
         
     def _steps(self):
         for name in dir(self): # dir() result is implicitly sorted
@@ -123,7 +185,7 @@ class TestGC(unittest.TestCase):
         
         try:
             for name, num, step in self._steps():
-                if(num > 1):
+                if(num > 5):
                     step()
                     
         except Exception as e:

@@ -75,6 +75,14 @@ class TestGC(unittest.TestCase):
         self.assertEqual("29495143", s.ComdirectId)
         self.assertEqual("ETF", s.StockType)
         
+        # Cash
+        s = Stock("CASH")
+        engines.scaffold.enrichStock(self.gc, s)
+        
+        self.assertEqual("Cash", s.WKN, "Check WKN")
+        self.assertEqual("-1", s.ComdirectId, "Check ComdirectId")
+        self.assertEqual("Cash", s.StockType, "Check Type")
+        
         
         # Non-Existing Stock
         s = Stock("DE000A141DW0")
@@ -178,21 +186,21 @@ class TestGC(unittest.TestCase):
         self.gc = glob.GlobalContainer("config-test.cfg", "TestRun")
         self.gc.logger.info("####################### STARTING #######################")
         
-        for name, num, step in self._steps():
-            try:
+        try:
+            for name, num, step in self._steps():
                 if(num > -1):
                     step()
-            except Exception as e:
-
-                self.fail("{} failed ({}: {})".format(step, type(e), e))
+                    
+        except Exception as e:
+            self.fail("{} failed ({}: {})".format(step, type(e), e))
                 
-
-        print("####################### Disposing Engine #######################")
-        self.gc.ses.commit()
-        self.gc.ses.close()
-        self.gc.eng.dispose()
-        
-        self.gc.logger.info("####################### END #######################")
+        finally:
+            print("####################### Disposing Engine #######################")
+            self.gc.ses.commit()
+            self.gc.ses.close()
+            self.gc.eng.dispose()
+            
+            self.gc.logger.info("####################### END #######################")
 
 
 if __name__ == '__main__':

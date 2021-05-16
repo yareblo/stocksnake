@@ -10,6 +10,8 @@ import engines.scaffold
 import pandas as pd
 import datetime
 import xirr
+from influxdb_client import InfluxDBClient
+from influxdb_client.client.write_api import SYNCHRONOUS
 
 from pytz import UTC
 
@@ -60,6 +62,9 @@ def buildDepot(gc, df_trans, df_distri, myDepot):
             # calculate delta to target
             df_full[f"delta-{isin}"] = (df_full[f"perc-{isin}"] - df_full[f"target-{isin}"])* df_full['Value-total']
     
+         #Problem: There are sometimes rows where not all stocks have a value. Those rows should be removed. 
+         #   But not stupidly blind, because there might be a ramp-up
+    
         # Saving
         # remove rows with nas
         logger.debug(f"Deleting Depot {myDepot}")
@@ -70,7 +75,7 @@ def buildDepot(gc, df_trans, df_distri, myDepot):
         else:
             endDateString = datetime.datetime.now().isoformat("T") + "Z"
             del_api = gc.influxClient.delete_api()
-            del_api.delete("1900-01-01T00:00:00Z", endDateString, f'Depot="{myDepot}"', bucket=gc.influx_db, org=gc.influx_org)
+            del_api.delete("1900-01-01T00:00:00Z", endDateString, f'Depot="{myDepot}" and _measurement="Depots"', bucket=gc.influx_db, org=gc.influx_org)
         
         
         logger.debug(f"Saving Depot {myDepot}")
@@ -103,7 +108,7 @@ def buildDepotStock(gc, df_trans, df_distri, myDepot, myISIN):
 
         engines.scaffold.addStock(gc, myISIN)
         
-        # Filter for depot and ISIN and cumulate
+        # Filter for depot and ISIN 
         df_trans = df_trans[(df_trans['Depot'] == myDepot) & (df_trans['ISIN'] == myISIN)]
 
         # if there is no transaction, we add an empty transaction. Reason: Thete might be an isin in the distribution, but not in the transactions
@@ -115,8 +120,7 @@ def buildDepotStock(gc, df_trans, df_distri, myDepot, myISIN):
         df_trans = df_trans.set_index('TimeStamp')
         df_trans = df_trans.drop('Datum', axis=1)
         
-        # Filter for depot and ISIN and cumulate
-        
+        # Cumulate Anzahl and Wert
         df_trans[f'NumStock-{myISIN}'] = df_trans['Anzahl'].cumsum()
         df_trans[f'Invested-{myISIN}'] = df_trans['Wert'].cumsum()
         
@@ -128,7 +132,7 @@ def buildDepotStock(gc, df_trans, df_distri, myDepot, myISIN):
         df_distri = df_distri.set_index('TimeStamp')
         df_distri = df_distri.drop('Datum', axis=1)
         
-        # Filter for depot and ISIN and cumulate
+        # Filter for depot and ISIN
         df_distri = df_distri[(df_distri['Depot'] == myDepot) & (df_distri['ISIN'] == myISIN)]
         
         
@@ -202,8 +206,10 @@ def loadStock(gc, myISIN, startDate):
                         |> keep(columns: ["_time","_value"])'
                             
             #print(qry)
-                            
-            res = gc.influx_query_api.query_data_frame(qry)
+                        
+            with InfluxDBClient(url=f"http://{gc.influx_host}:{gc.influx_port}", 
+                                                   token=gc.influx_token, org=gc.influx_org, timeout=180_000) as client:
+                res = client.query_api().query_data_frame(qry)
 
             if ((res is not None) and (len(res.index) > 0)):
                 res = res.rename(columns={'_value': 'close'})
@@ -248,8 +254,14 @@ def saveDepot(gc, df_full, myDepot):
             for df_chunk in gc.chunk(df_full, step):
                 logger.debug(f"Saving {x} of {len(df_full.index)}...")
                 x += step
-                gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df_chunk, data_frame_measurement_name="Depots", data_frame_tag_columns=['Depot'])
-                gc.influx_write_api.close()
+                
+                with InfluxDBClient(url=f"http://{gc.influx_host}:{gc.influx_port}", 
+                                                   token=gc.influx_token, org=gc.influx_org, timeout=180_000) as client:
+                    
+                    with client.write_api(write_options=SYNCHRONOUS) as write_api:
+                
+                        write_api.write(gc.influx_db, gc.influx_org, record=df_chunk, data_frame_measurement_name="Depots", data_frame_tag_columns=['Depot'])
+                        write_api.close()
     
     
         gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
@@ -316,3 +328,85 @@ def calcXIRR(gc, df_full, myDepot, days):
         logger.exception(f'Crash calcXIRR with {loc}!', exc_info=e)
         gc.numErrors += 1
         gc.errMsg += f"Crash calcXIRR with {loc}; "
+        
+        
+        
+        
+def calcABeckKPI(gc):
+    """calculates the XIRR of the depot for the last x days"""
+    
+    loc = locals()
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = f"Starting calcABeckKPI with {loc}"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+        # Diese ISIN scheint zu passen, da gibt's auch eine ISIN
+        myISIN = "IE00B0M62Q58"
+        engines.scaffold.addStock(gc, myISIN)
+        
+        # get all time high of MSCI World
+        
+        qry = f'from(bucket: \"{gc.influx_db}\") \
+                |> range(start: 0)  \
+                |> filter(fn: (r) => r["_measurement"] == \"StockValues\") \
+                |> filter(fn: (r) => r["ISIN"] == \"{myISIN}\") \
+                |> filter(fn: (r) => r["_field"] == "close") \
+                |> max()'
+        
+        res = gc.iQuery(qry)
+        
+        allHigh = -1
+        if len(res) > 0:
+            allHigh = res.loc[0]['_value']
+        
+        # with pd.option_context('display.max_rows', None, 'display.max_columns', None): 
+        #     print(res)
+        
+        # get last value
+        
+        qry = f'from(bucket: \"{gc.influx_db}\") \
+                |> range(start: 0)  \
+                |> filter(fn: (r) => r["_measurement"] == \"StockValues\") \
+                |> filter(fn: (r) => r["ISIN"] == \"{myISIN}\") \
+                |> filter(fn: (r) => r["_field"] == "close") \
+                |> sort(columns: ["_time"], desc: true) \
+                |> first()'
+        
+        res = gc.iQuery(qry)
+        
+        lastVal = -1
+        if len(res) > 0:
+            lastVal = res.loc[0]['_value']
+        
+        logger.debug(f"AllTimeHigh of MSCI World: {allHigh}")
+        logger.debug(f"LastVal of MSCI World: {lastVal}")
+        
+        perc = -1
+        if ((allHigh > 0) and (lastVal > 0)):
+            perc = lastVal / allHigh
+        
+        logger.debug(f"Percent: {perc}")
+   
+        # Save
+        now=pd.Timestamp(datetime.datetime.now(UTC)).replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        df_res = pd.DataFrame(index=[now], columns=["KPI-Value", "KPI", "Depot"], data=[[perc, f"ABeckKPI", "All"]])
+        #print(df_res)
+        #if ((x != float("inf")) and (x != float("-inf"))):
+        if (perc > 0):
+            gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df_res, data_frame_measurement_name="KPIs", data_frame_tag_columns=['Depot', 'KPI'])
+            gc.influx_write_api.close()
+    
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+    except Exception as e:
+        logger.exception(f'Crash calcABeckKPI with {loc}!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += f"Crash calcABeckKPI with {loc}; "
+        
+        
+        
+        
