@@ -291,7 +291,7 @@ class GlobalContainer(object):
                     
                     org_name = self.influx_org
                     org = list(filter(lambda it: it.name == org_name, self.influxClient.organizations_api().find_organizations()))[0]
-                    retention_rules = BucketRetentionRules(type="forever", every_seconds=0)  #3600*24*365*200
+                    retention_rules = BucketRetentionRules(type="forever", every_seconds=0, shard_group_duration_seconds=60*60*24*90)  #3600*24*365*200
                     created_bucket = buckets_api.create_bucket(bucket_name = self.influx_db, retention_rules=retention_rules, org_id = org.id)
             
         except Exception as e:

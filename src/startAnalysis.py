@@ -78,6 +78,7 @@ try:
     
     
     #KPI-Berechnungen
+    engines.analysis.calcABeckKPI(gc)
     
     
     #Korrelationsmatrix pro Depot
