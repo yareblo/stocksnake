@@ -22,6 +22,15 @@ if(isset($_POST['Submit'])){
 }
 ?>
 
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>Login</title>
+		<link href="/style.css" rel="stylesheet" type="text/css">
+		<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css">
+	</head>
+	<body>
 
 <form action="" method="post" name="Login_Form">
   <table width="400" border="0" align="center" cellpadding="5" cellspacing="1" class="Table">
@@ -47,3 +56,6 @@ if(isset($_POST['Submit'])){
     </tr>
   </table>
 </form>
+
+    </body>
+</html>

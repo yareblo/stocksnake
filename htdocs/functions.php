@@ -15,7 +15,12 @@ function pdo_connect_mysql() {
 
 function template_header($title) {
 	
-session_start(); /* Starts the session */
+
+if(!isset($_SESSION)) 
+{ 
+    session_start(); 
+}
+
 if(!isset($_SESSION['UserData']['Username'])){
 	header("location:/login.php");
 	exit;
@@ -35,8 +40,9 @@ echo <<<EOT
     	<div>
     		<h1>StockSnake</h1>
             <a href="/index.php"><i class="fas fa-home"></i>Home</a>
-    		<a href="/transactions/read.php"><i class="fas fa-address-book"></i>Transactions</a>
-			<a href="/logout.php"><i class="fas fa-address-book"></i>Log-Out</a>
+    		<a href="/transactions/read.php"><i class="fas fa-euro-sign"></i>Transactions</a>
+			<a href="/stocks/read.php"><i class="fas fa-chart-line"></i>Stocks</a>
+			<a href="/logout.php"><i class="fas fa-sign-out-alt"></i>Log-Out</a>
     	</div>
     </nav>
 EOT;

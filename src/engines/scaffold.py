@@ -59,7 +59,7 @@ def addStock(gc, isin):
     except Exception as e:
         logger.exception('Crash!', exc_info=e)
         gc.numErrors += 1
-        gc.errMsg += "Crash loading stock {isin}; "
+        gc.errMsg += f"Crash loading stock {isin}; "
     
 
 
@@ -143,6 +143,57 @@ def loadNotes(gc, path):
         logger.exception('Crash!', exc_info=e)
         gc.numErrors += 1
         gc.errMsg += "Crash loading Notes; "
+
+
+def clearTransactions(gc, depot):
+    """ Deletes all transactions for a specific depot in the database table. if depot is None, all transactions are deleted """
+    loc = locals()
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = f"Starting xxx with {loc}"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+#   Fehlt
+    
+    
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+    except Exception as e:
+        logger.exception(f'Crash xxx with {loc}!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += f"Crash xxx with {loc}; "
+
+
+
+def fillTransactions(gc, path, appent = True):
+    """ Loads all odf-files in path of name <Transaction_DEPOTNAME.odf> and stores them in the database table.
+    
+        If append = False, all existing transactions are deleted for the depot in the filename
+    
+        Unique index for transactions is: Date, Depot, ISIN
+            
+        File structure: Date, Depot, ISIN, Number, Price, Value (number x price + transaction-cost)
+    
+    """
+    loc = locals()
+    logger = logging.getLogger(__name__)
+    
+    try:
+        msg = f"Starting xxx with {loc}"
+        logger.debug(msg)
+        gc.writeJobStatus("Running", statusMessage=msg)
+        
+#   Fehlt
+    
+    
+        gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
+        logger.debug(msg + " - DONE")
+    except Exception as e:
+        logger.exception(f'Crash xxx with {loc}!', exc_info=e)
+        gc.numErrors += 1
+        gc.errMsg += f"Crash xxx with {loc}; "
 
 
 

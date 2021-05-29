@@ -1,7 +1,14 @@
-<?php session_start(); /* Starts the session */
+<?php 
+
+if(!isset($_SESSION)) 
+{ 
+    session_start(); 
+} 
+
+
 if(!isset($_SESSION['UserData']['Username'])){
-header("location:login.php");
-exit;
+	header("location:login.php");
+	exit;
 }
 ?>
 

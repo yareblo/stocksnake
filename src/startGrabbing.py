@@ -45,6 +45,7 @@ try:
     logger.info(f"Loglevel:          {l}")
     logger.info(f"Arguments:         {args}")
     logger.setLevel(l)
+    gc.writeJobMessage("INFO", "Script", "startGrabbing", "Started")
     
     if (args['resetMySQL'].lower() == 'y'):
         gc.resetMySQLDatabases()
@@ -72,12 +73,14 @@ try:
     
     if (gc.numErrors == 0):
         gc.writeJobStatus("Completed", EndDate=datetime.datetime.now(), SuccessDate=datetime.datetime.now(), statusMessage="Completed OK")
+        gc.writeJobMessage("INFO", "Script", "startGrabbing", "Completed OK")
     else:
         gc.writeJobStatus("ERROR", EndDate=datetime.datetime.now(), statusMessage=gc.errMsg)
         logger.error("")
         logger.error(f'Number of Errors: {gc.numErrors}')
         logger.error(f'ErrorMessage:     {gc.errMsg}')
         logger.error("")
+        gc.writeJobMessage("ERROR", "Script", "startGrabbing", f"Completed with error: {gc.errMsg}")
         
     l = logging.root.level
     logger.setLevel(logging.DEBUG)

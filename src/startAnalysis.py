@@ -50,6 +50,7 @@ try:
     logger.info(f"Loglevel:          {l}")
     logger.info(f"Arguments:         {args}")
     logger.setLevel(l)
+    gc.writeJobMessage("INFO", "Script", "startAnalysis", "Started")
         
     # Build Portfolio
     
@@ -121,16 +122,16 @@ try:
     #     #print(df_corr.stack().reset_index().sort_values(0, ascending=False))
     
     
-    
-    
     if (gc.numErrors == 0):
         gc.writeJobStatus("Completed", EndDate=datetime.datetime.now(), SuccessDate=datetime.datetime.now(), statusMessage="Completed OK")
+        gc.writeJobMessage("INFO", "Script", "startAnalysis", "Completed OK")
     else:
         gc.writeJobStatus("ERROR", EndDate=datetime.datetime.now(), statusMessage=gc.errMsg)
         logger.error("")
         logger.error(f'Number of Errors: {gc.numErrors}')
         logger.error(f'ErrorMessage:     {gc.errMsg}')
         logger.error("")
+        gc.writeJobMessage("ERROR", "Script", "startAnalysis", f"Completed with error: {gc.errMsg}")
         
     l = logging.root.level
     logger.setLevel(logging.DEBUG)

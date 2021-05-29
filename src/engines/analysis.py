@@ -13,9 +13,14 @@ import xirr
 from influxdb_client import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 
+from sqlalchemy import and_
+
+from dataobjects.depotPosition import DepotPosition
+from dataobjects.stock import Stock
+
 from pytz import UTC
 
-import sys
+import sys, os, math
 
 
 def buildDepot(gc, df_trans, df_distri, myDepot):
@@ -50,6 +55,9 @@ def buildDepot(gc, df_trans, df_distri, myDepot):
             else:
                 df_full = df_full.join(df, how="outer")
 
+        # fill nans
+        df_full = df_full.fillna(method='ffill', limit=2)
+
         # add a summary column
         df_full['Value-total']= df_full[list(df_full.filter(regex='Value'))].sum(axis=1)
         df_full['Invested-total']= df_full[list(df_full.filter(regex='Invested'))].sum(axis=1)
@@ -65,7 +73,97 @@ def buildDepot(gc, df_trans, df_distri, myDepot):
          #Problem: There are sometimes rows where not all stocks have a value. Those rows should be removed. 
          #   But not stupidly blind, because there might be a ramp-up
     
-        # Saving
+        ### Fill Depot Position
+        totRow = {'ISIN':'total'}
+        df_isinstot = df_isins1.append(totRow, ignore_index=True)
+
+        for myISIN in df_isinstot['ISIN'].unique():
+            
+            res = gc.ses.query(DepotPosition).filter(and_(DepotPosition.Depot == myDepot, DepotPosition.ISIN == myISIN))
+            if (res.count() == 0):
+                pos = DepotPosition(myDepot, myISIN)
+                gc.ses.add(pos)
+                gc.ses.commit()
+            else:
+                pos = res.first()
+    
+            res = gc.ses.query(Stock).filter(Stock.ISIN == myISIN)
+            if (res.count() > 0):
+                pos.Name = res[0].Name
+    
+            if (myISIN != 'total'):
+                pos.NumStock = float(df_full[f'NumStock-{myISIN}'].iloc[-1])
+                pos.CurPrice = float(df_full[f'close-{myISIN}'].iloc[-1])
+
+                if (df_full[f'NumStock-{myISIN}'].iloc[-1] != 0):
+                    pos.BuyPrice = float(df_full[f'Invested-{myISIN}'].iloc[-1] / df_full[f'NumStock-{myISIN}'].iloc[-1])
+                else:
+                    pos.BuyPrice = 0
+            else:
+                pos.Name = "Total"
+                
+            pos.CurValue = float(df_full[f'Value-{myISIN}'].iloc[-1])
+                
+            pos.BuyValue = float(df_full[f'Invested-{myISIN}'].iloc[-1])
+            
+            # pos.Percentage = Column(Float)
+            pos.Perc = float(df_full[f"perc-{myISIN}"].iloc[-1])
+            pos.PercTarget = float(df_full[f"target-{myISIN}"].iloc[-1])
+            
+            if (math.isnan(pos.PercTarget)):
+                pos.PercTarget=0
+            
+            pos.PercDiff = float(pos.Perc - pos.PercTarget)
+            pos.CurValTarget = float(df_full['Value-total'].iloc[-1] * pos.PercTarget)
+            
+            pos.CurValDiff = float((pos.Perc - pos.PercTarget)* df_full['Value-total'].iloc[-1])
+            
+            
+            if (len(df_full.index)>1):
+                if (df_full[f'Value-{myISIN}'].iloc[-2] != 0):
+                    pos.GainDayPerc = float((df_full[f'Value-{myISIN}'].iloc[-1] / df_full[f'Value-{myISIN}'].iloc[-2]) -1)
+                else:
+                    pos.GainDayPerc = 0
+                pos.GainDayAbs = float(df_full[f'Value-{myISIN}'].iloc[-1] - df_full[f'Value-{myISIN}'].iloc[-2]) 
+            else:
+                pos.GainDayPerc = 0
+                pos.GainDayAbs = 0
+                
+            pos.GainAllPerc = float((df_full[f'Value-{myISIN}'].iloc[-1] / df_full[f'Invested-{myISIN}'].iloc[-1]) -1)
+            pos.GainAllAbs = float(df_full[f'Value-{myISIN}'].iloc[-1] - df_full[f'Invested-{myISIN}'].iloc[-1])
+            pos.XIRR90 = float(calcXIRR(gc, df_full, myDepot, 90, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+            pos.XIRR180 = float(calcXIRR(gc, df_full, myDepot, 180, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+            pos.XIRR_1Y = float(calcXIRR(gc, df_full, myDepot, 365, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+            pos.XIRR_3Y = float(calcXIRR(gc, df_full, myDepot, 3*365, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+            pos.XIRR_5Y = float(calcXIRR(gc, df_full, myDepot, 5*365, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+            
+            if (myISIN != 'total'):
+                df_trans_isin = df_trans[(df_trans['Depot'] == myDepot) & (df_trans['ISIN'] == myISIN)]
+            else:
+                df_trans_isin = df_trans
+            
+            pos.NumTransactions = len(df_trans_isin.index)
+            
+            pos.DateLastTransaction = df_trans_isin['Datum'].iloc[-1].to_pydatetime()
+            #print (pos.DateLastTransaction)
+            #print (type(pos.DateLastTransaction))
+            #sys.exit()
+            
+            df_trans_isin['time-diff'] = df_trans_isin['Datum'].diff()
+            #print(df_trans_isin)
+            #print(df_trans_isin['time-diff'].mean())
+            pos.AvgDiffTransactions = float(df_trans_isin['time-diff'].mean() / datetime.timedelta(days=1))  # Average Days between transactions
+            if (math.isnan(pos.AvgDiffTransactions)):
+                pos.AvgDiffTransactions = 0
+            
+            pos.DateLastUpdate = datetime.datetime.now()
+            
+            gc.ses.add(pos)
+            gc.ses.commit()
+            
+            
+    
+        ### Saving
         # remove rows with nas
         logger.debug(f"Deleting Depot {myDepot}")
         gc.writeJobStatus("Running", statusMessage=f"Deleting Depot {myDepot}")
@@ -87,6 +185,7 @@ def buildDepot(gc, df_trans, df_distri, myDepot):
         calcXIRR(gc, df_full, myDepot, 3*365)
         calcXIRR(gc, df_full, myDepot, 365)
         calcXIRR(gc, df_full, myDepot, 180)
+        calcXIRR(gc, df_full, myDepot, 90)
         
         logger.debug(f'Building depot {myDepot} - DONE')
     
@@ -96,6 +195,8 @@ def buildDepot(gc, df_trans, df_distri, myDepot):
         logger.exception(f"Crash building depot for depot {myDepot}", exc_info=e)
         gc.numErrors += 1
         gc.errMsg += f"Crash building depot for depot {myDepot}; "
+        logger.error("################################### STOPPING!! ###############################")
+        sys.exit()
 
 
 def buildDepotStock(gc, df_trans, df_distri, myDepot, myISIN):
@@ -124,7 +225,6 @@ def buildDepotStock(gc, df_trans, df_distri, myDepot, myISIN):
         df_trans[f'NumStock-{myISIN}'] = df_trans['Anzahl'].cumsum()
         df_trans[f'Invested-{myISIN}'] = df_trans['Wert'].cumsum()
         
-        
         # add target percentage
         
         # convert date to timestamp
@@ -134,7 +234,6 @@ def buildDepotStock(gc, df_trans, df_distri, myDepot, myISIN):
         
         # Filter for depot and ISIN
         df_distri = df_distri[(df_distri['Depot'] == myDepot) & (df_distri['ISIN'] == myISIN)]
-        
         
         # merge with data
         # get stock data
@@ -157,6 +256,58 @@ def buildDepotStock(gc, df_trans, df_distri, myDepot, myISIN):
         df_full[f'Value-{myISIN}'] = df_full['close'] * df_full[f'NumStock-{myISIN}']
         df_full = df_full.rename(columns={'close': f'close-{myISIN}', 'Ziel': f'target-{myISIN}'})
         
+        #Save DF_full to excel for analysis. we have a crash!
+        df_full.to_excel(os.path.join(gc.data_root, f"Debug-{myDepot}-{myISIN}.ods"), engine = "odf")
+        
+        ### Write Depot Position
+        # res = gc.ses.query(DepotPosition).filter(and_(DepotPosition.Depot == myDepot, DepotPosition.ISIN == myISIN))
+        # if (res.count() == 0):
+        #     pos = DepotPosition(myDepot, myISIN)
+        #     gc.ses.add(pos)
+        #     gc.ses.commit()
+        # else:
+        #     pos = res.first()
+
+        # res = gc.ses.query(Stock).filter(Stock.ISIN == myISIN)
+        # if (res.count() > 0):
+        #     pos.Name = res[0].Name
+
+        # pos.NumStock = float(df_full[f'NumStock-{myISIN}'].iloc[-1])
+        # pos.CurPrice = float(df_full[f'close-{myISIN}'].iloc[-1])
+        # pos.CurValue = float(df_full[f'Value-{myISIN}'].iloc[-1])
+        
+        # if (df_full[f'NumStock-{myISIN}'].iloc[-1] != 0):
+        #     pos.BuyPrice = float(df_full[f'Invested-{myISIN}'].iloc[-1] / df_full[f'NumStock-{myISIN}'].iloc[-1])
+        # else:
+        #     pos.BuyPrice = 0
+            
+        # pos.BuyValue = float(df_full[f'Invested-{myISIN}'].iloc[-1])
+        
+        # # pos.Percentage = Column(Float)
+        # if (len(df_full.index)>1):
+        #     if (df_full[f'Value-{myISIN}'].iloc[-2] != 0):
+        #         pos.GainDayPerc = float((df_full[f'Value-{myISIN}'].iloc[-1] / df_full[f'Value-{myISIN}'].iloc[-2]) -1)
+        #     else:
+        #         pos.GainDayPerc = 0
+        #     pos.GainDayAbs = float(df_full[f'Value-{myISIN}'].iloc[-1] - df_full[f'Value-{myISIN}'].iloc[-2]) 
+        # else:
+        #     pos.GainDayPerc = 0
+        #     pos.GainDayAbs = 0
+            
+        # pos.GainAllPerc = float((df_full[f'Value-{myISIN}'].iloc[-1] / df_full[f'Invested-{myISIN}'].iloc[-1]) -1)
+        # pos.GainAllAbs = float(df_full[f'Value-{myISIN}'].iloc[-1] - df_full[f'Invested-{myISIN}'].iloc[-1])
+        # pos.XIRR90 = float(calcXIRR(gc, df_full, myDepot, 90, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+        # pos.XIRR180 = float(calcXIRR(gc, df_full, myDepot, 180, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+        # pos.XIRR_1Y = float(calcXIRR(gc, df_full, myDepot, 365, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+        # pos.XIRR_3Y = float(calcXIRR(gc, df_full, myDepot, 3*365, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+        # pos.XIRR_5Y = float(calcXIRR(gc, df_full, myDepot, 5*365, valColumn = f'Value-{myISIN}', investColumn = f'Invested-{myISIN}', save=False))
+        # pos.NumTransactions = len(df_trans.index)
+        # pos.DateLastTransaction = df_trans['Datum'].iloc[-1]
+        # #pos.AvgDiffTransactions = Column(Float)  # Average Days between transactions
+        # pos.DateLastUpdate = datetime.datetime.now()
+        
+        # gc.ses.add(pos)
+        # gc.ses.commit()
         
         return df_full
     
@@ -164,6 +315,8 @@ def buildDepotStock(gc, df_trans, df_distri, myDepot, myISIN):
         logger.exception(f"Crash building depot for depot {myDepot}, stock {myISIN}", exc_info=e)
         gc.numErrors += 1
         gc.errMsg += f"Crash building depot for depot {myDepot}, stock {myISIN}; "
+        logger.error("################################### STOPPING!! ###############################")
+        sys.exit()
 
 
 def createFlatStock(gc, startDate, value):
@@ -272,7 +425,7 @@ def saveDepot(gc, df_full, myDepot):
         gc.errMsg += f"Crash saveDepot with {loc}; "
     
     
-def calcXIRR(gc, df_full, myDepot, days):
+def calcXIRR(gc, df_full, myDepot, days, valColumn = 'Value-total', investColumn = 'Invested-total', save=True):
     """calculates the XIRR of the depot for the last x days"""
     
     loc = locals()
@@ -286,44 +439,57 @@ def calcXIRR(gc, df_full, myDepot, days):
         # get value at start date
         startDate = datetime.datetime.now() - datetime.timedelta(days=days)
         df = df_full.loc[(df_full.index >= startDate)]
-        df = df[['Value-total', 'Invested-total']]
+        df = df[[valColumn, investColumn]]
         
         l_xirr = {}
         
         startVal=0
         if (len(df.index) > 0):
             startDate = df.index[0]
-            startVal = df.iloc[0]['Value-total']
+            startVal = df.iloc[0][valColumn]
         
         l_xirr[startDate] = startVal
         
         # get transactions
         df_diff = df.diff().dropna()
-        df_diff = df_diff[df_diff['Invested-total'] != 0]
+        df_diff = df_diff[df_diff[investColumn] != 0]
 
         for i, row in df_diff.iterrows():
-            l_xirr[i] = row['Invested-total']
+            l_xirr[i] = row[investColumn]  
         
         # get value at end
-        l_xirr[df.index[-1]] = -df.iloc[-1]['Value-total']
+        l_xirr[df.index[-1]] = -df.iloc[-1][valColumn]
         
-        # calculate
-        #print(l_xirr)
-        x = xirr.xirr(l_xirr)
+        x = -1
         
-        logger.debug(f"XIRR of depot {myDepot}: {x}")
-   
-        # Save
-        now=pd.Timestamp(datetime.datetime.now(UTC)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if ((df.index[-1] - startDate).days > 30):
         
-        df_res = pd.DataFrame(index=[now], columns=["KPI-Value", "KPI", "Depot"], data=[[x, f"XIRR-{days}", myDepot]])
-        #print(df_res)
-        if ((x != float("inf")) and (x != float("-inf"))):
-            gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df_res, data_frame_measurement_name="KPIs", data_frame_tag_columns=['Depot', 'KPI'])
-            gc.influx_write_api.close()
+            x = xirr.xirr(l_xirr)
+            
+            logger.debug(f"XIRR of depot {myDepot}: {x}")
+       
+            # Save
+            now=pd.Timestamp(datetime.datetime.now(UTC)).replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            df_res = pd.DataFrame(index=[now], columns=["KPI-Value", "KPI", "Depot"], data=[[x, f"XIRR-{days}", myDepot]])
+            #print(df_res)
+            if ((x != float("inf")) and (x != float("-inf")) and (save==True)):
+                gc.influx_write_api.write(gc.influx_db, gc.influx_org, record=df_res, data_frame_measurement_name="KPIs", data_frame_tag_columns=['Depot', 'KPI'])
+                gc.influx_write_api.close()
+        else:
+            logger.warn(f"Not calculating xirr due to short timespan of {(df.index[-1] - startDate).days} days")
     
         gc.writeJobStatus("Running", statusMessage=msg + " - DONE")
         logger.debug(msg + " - DONE")
+        
+        if (x == float("inf")):
+            x = 9999
+            
+        if (x == float("-inf")):
+            x = -9999
+        
+        return x
+        
     except Exception as e:
         logger.exception(f'Crash calcXIRR with {loc}!', exc_info=e)
         gc.numErrors += 1

@@ -27,6 +27,7 @@ from influxdb_client.client.write_api import SYNCHRONOUS, WriteType
 from influxdb_client.client.write.retry import WritesRetry
 
 from dataobjects.scriptStatus import ScriptStatus
+from dataobjects.logMessage import LogMessage
 from engines.resolver import Resolver
 
 
@@ -346,8 +347,14 @@ class GlobalContainer(object):
 
     
     def writeJobMessage(self, logType, logObject, logObjectId, message):
+        """ Writes a message into the log table
+                logType: Error, Warning, Info, Debug
+                logObject: Stock, Depot, Script,...
+                LogObjectId: ISIN, Depot-Name,...
+                Message: Message
+        """
         try:
-            jobMessage = (self.runId, logType, logObject, logObjectId, message)
+            jobMessage = LogMessage(self.runId, logType, logObject, logObjectId, message)
             
             self.ses.add(jobMessage)
             self.ses.commit()
